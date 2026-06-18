@@ -4366,8 +4366,7 @@ namespace SpanCoder.Shell
                             Content = "Enabled",
                             Margin = new Thickness(0, 2, 0, 8)
                         };
-                        cb.Checked += (s, e) => SettingsManager.Set(desc.Id, "true");
-                        cb.Unchecked += (s, e) => SettingsManager.Set(desc.Id, "false");
+                        cb.IsCheckedChanged += (s, e) => SettingsManager.Set(desc.Id, cb.IsChecked == true ? "true" : "false");
                         settingRow.Children.Add(cb);
                     }
                     else

@@ -2749,7 +2749,7 @@ namespace SpanCoder.Shell
                     string jsonRequest = System.Text.Json.JsonSerializer.Serialize(requestBody);
                     var httpContent = new System.Net.Http.StringContent(jsonRequest, System.Text.Encoding.UTF8, "application/json");
 
-                    var response = await _httpClient.PostAsync("http://localhost:11434/api/generate", httpContent);
+                    var response = await _httpClient.PostAsync("http://127.0.0.1:11434/api/generate", httpContent);
                     if (response.IsSuccessStatusCode)
                     {
                         var jsonResponse = await response.Content.ReadAsStringAsync();
@@ -2789,7 +2789,7 @@ namespace SpanCoder.Shell
             {
                 UpdateStatusBarText("AI: Checking local Ollama...");
 
-                var response = await _httpClient.GetAsync("http://localhost:11434/api/tags");
+                var response = await _httpClient.GetAsync("http://127.0.0.1:11434/api/tags");
                 if (!response.IsSuccessStatusCode)
                 {
                     UpdateStatusBarText("AI Offline: Local Ollama returned error.");
@@ -2811,7 +2811,7 @@ namespace SpanCoder.Shell
                 
                 var pullContent = new System.Net.Http.StringContent("{\"name\": \"qwen2.5-coder:1.5b\", \"stream\": false}", System.Text.Encoding.UTF8, "application/json");
                 _httpClient.Timeout = TimeSpan.FromMinutes(10); // Give pull plenty of time
-                var pullResponse = await _httpClient.PostAsync("http://localhost:11434/api/pull", pullContent);
+                var pullResponse = await _httpClient.PostAsync("http://127.0.0.1:11434/api/pull", pullContent);
                 if (pullResponse.IsSuccessStatusCode)
                 {
                     UpdateStatusBarText("AI: qwen2.5-coder:1.5b ready");

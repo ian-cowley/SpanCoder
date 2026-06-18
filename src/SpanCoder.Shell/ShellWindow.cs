@@ -1768,7 +1768,19 @@ namespace SpanCoder.Shell
         }
 
         public IDocumentView? ActiveDocumentView => _activeDocument?.Document;
-        public string? WorkspaceRootPath => _fileTree.RootPath;
+        public string? WorkspaceRootPath
+        {
+            get
+            {
+                string? root = _fileTree.RootPath;
+                if (string.IsNullOrEmpty(root)) return null;
+                if (System.IO.File.Exists(root))
+                {
+                    return System.IO.Path.GetDirectoryName(root);
+                }
+                return root;
+            }
+        }
 
         public void MoveCaretToLine(int line)
         {

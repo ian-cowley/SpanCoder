@@ -243,9 +243,20 @@ namespace SpanCoder.App
                     }
                 }
             }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("[ExtensionManager] Extension connection closed (canceled).");
+            }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ExtensionManager] Extension communication error: {ex.Message}");
+                if (_cts.Token.IsCancellationRequested)
+                {
+                    Console.WriteLine("[ExtensionManager] Extension connection closed during shutdown.");
+                }
+                else
+                {
+                    Console.WriteLine($"[ExtensionManager] Extension communication error: {ex.Message}");
+                }
             }
             finally
             {

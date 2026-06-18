@@ -69,7 +69,16 @@ namespace SpanCoder.Shell
                     {
                         try
                         {
-                            current.InputGesture = KeyGesture.Parse(cmdDesc.DefaultShortcut);
+                            string shortcut = cmdDesc.DefaultShortcut;
+                            if (shortcut.EndsWith("+/"))
+                            {
+                                shortcut = shortcut.Substring(0, shortcut.Length - 1) + "Oem2";
+                            }
+                            else if (shortcut == "/")
+                            {
+                                shortcut = "Oem2";
+                            }
+                            current.InputGesture = KeyGesture.Parse(shortcut);
                         }
                         catch (Exception ex)
                         {

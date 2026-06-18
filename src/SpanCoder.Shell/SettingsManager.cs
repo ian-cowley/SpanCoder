@@ -8,11 +8,35 @@ namespace SpanCoder.Shell
 {
     public static class SettingsManager
     {
-        private static readonly string SettingsFilePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "SpanCoder",
-            "settings.json"
-        );
+        private static readonly string SettingsFilePath = GetDefaultSettingsFilePath();
+
+        private static string GetDefaultSettingsFilePath()
+        {
+            if (IsRunningInUnitTest())
+            {
+                return Path.Combine(Path.GetTempPath(), "spancoder_test_settings.json");
+            }
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "SpanCoder",
+                "settings.json"
+            );
+        }
+
+        private static bool IsRunningInUnitTest()
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                string name = assembly.FullName ?? "";
+                if (name.Contains("test", StringComparison.OrdinalIgnoreCase) || 
+                    name.Contains("xunit", StringComparison.OrdinalIgnoreCase) || 
+                    name.Contains("nunit", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         private static readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, SettingDescriptor> _descriptors = new(StringComparer.OrdinalIgnoreCase);
@@ -28,6 +52,13 @@ namespace SpanCoder.Shell
             RegisterBuiltIn("workbench.theme", "Theme (Dark/Light)", "string", "Dark");
             RegisterBuiltIn("workbench.statusBarVisible", "Show Status Bar", "boolean", "true");
             RegisterBuiltIn("liveUnitTesting.enabled", "Enable Live Unit Testing", "boolean", "true");
+            RegisterBuiltIn("ai.provider", "AI Provider (OpenAI/Gemini/Ollama)", "string", "OpenAI");
+            RegisterBuiltIn("ai.openai.apikey", "OpenAI API Key", "string", "");
+            RegisterBuiltIn("ai.openai.model", "OpenAI Model", "string", "gpt-4o");
+            RegisterBuiltIn("ai.gemini.apikey", "Gemini API Key", "string", "");
+            RegisterBuiltIn("ai.gemini.model", "Gemini Model", "string", "gemini-1.5-pro");
+            RegisterBuiltIn("ai.ollama.apikey", "Ollama API Key (Optional)", "string", "");
+            RegisterBuiltIn("ai.ollama.model", "Ollama Model", "string", "qwen2.5-coder:7b");
 
             Load();
         }
@@ -83,9 +114,15 @@ namespace SpanCoder.Shell
 
         public static string Get(string id)
         {
-            if (_values.TryGetValue(id, out var val)) return val;
-            if (_descriptors.TryGetValue(id, out var desc)) return desc.DefaultValue;
-            return "";
+            string val = "";
+            if (_values.TryGetValue(id, out var v)) val = v;
+            else if (_descriptors.TryGetValue(id, out var desc)) val = desc.DefaultValue;
+
+            if (id.EndsWith(".apikey", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(val))
+            {
+                return DpapiHelper.Decrypt(val);
+            }
+            return val;
         }
 
         public static T Get<T>(string id, T fallback)
@@ -104,7 +141,14 @@ namespace SpanCoder.Shell
 
         public static void Set(string id, string value)
         {
-            _values[id] = value;
+            if (id.EndsWith(".apikey", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(value))
+            {
+                _values[id] = DpapiHelper.Encrypt(value);
+            }
+            else
+            {
+                _values[id] = value;
+            }
             Save();
             SettingChanged?.Invoke(id);
         }

@@ -46,6 +46,7 @@ namespace SpanCoder.Shell
 
         private IExtensionManager? _extensionManager;
         private TabControl _sidebarTabControl = null!;
+        private AiChatPanel _aiChatPanel = null!;
         private Menu _mainMenu = null!;
         private StackPanel _toolbarPanel = null!;
         private readonly Dictionary<string, TextBlock> _pluginPanels = new();
@@ -620,6 +621,28 @@ namespace SpanCoder.Shell
             };
             _sidebarTabControl.Items.Add(extTab);
 
+            // AI Chat Tab Layout
+            _aiChatPanel = new AiChatPanel();
+            var aiTabHeader = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2) };
+            aiTabHeader.Children.Add(new Avalonia.Controls.Shapes.Path
+            {
+                Width = 14,
+                Height = 14,
+                Data = StreamGeometry.Parse("M20,2 H4 C2.9,2 2,2.9 2,4 V22 L6,18 H20 C21.1,18 22,17.1 22,16 V4 C22,2.9 21.1,2 20,2 Z M18,14 H6 V12 H18 V14 Z M18,10 H6 V8 H18 V10 Z"),
+                Fill = new SolidColorBrush(Color.Parse("#4EC9B0")),
+                Stretch = Stretch.Uniform,
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            aiTabHeader.Children.Add(new TextBlock { Text = "AI Chat", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+
+            var aiTab = new TabItem
+            {
+                Header = aiTabHeader,
+                Content = _aiChatPanel
+            };
+            _sidebarTabControl.Items.Add(aiTab);
+
             RefreshExtensionsList();
 
             workspaceGrid.Children.Add(_sidebarTabControl);
@@ -1024,6 +1047,7 @@ namespace SpanCoder.Shell
         {
             _engine = engine;
             _engine.MessageReceived += OnEngineMessage;
+            _aiChatPanel.SetEngineConnection(engine);
         }
 
         public void ConnectExtensions(IExtensionManager extManager)
@@ -1480,6 +1504,16 @@ namespace SpanCoder.Shell
                         BinaryMessageSerializer.ParseDebugStateReport(payload, out int docId, out var stackFrames, out var variables);
                         _debugCallStackList.ItemsSource = stackFrames;
                         _debugVariablesList.ItemsSource = variables;
+                    }
+                    else if (header.Type == MessageTypes.AiChatResponse)
+                    {
+                        string json = BinaryMessageSerializer.ParseStringPayload(payload);
+                        _aiChatPanel.HandleChatResponse(json);
+                    }
+                    else if (header.Type == MessageTypes.AiToolExecutionEvent)
+                    {
+                        string json = BinaryMessageSerializer.ParseStringPayload(payload);
+                        _aiChatPanel.HandleToolExecutionEvent(json);
                     }
                 }
             });

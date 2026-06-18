@@ -99,7 +99,7 @@ namespace SpanCoder.Shell
 
         private void LoadCategories()
         {
-            var categories = new List<string> { "All", "Text Editor", "Workbench", "Extensions" };
+            var categories = new List<string> { "All", "Text Editor", "Workbench", "AI Settings", "Extensions" };
             _categoryList.ItemsSource = categories;
             _categoryList.SelectedIndex = 0;
         }
@@ -116,7 +116,8 @@ namespace SpanCoder.Shell
                 // Filter by category
                 if (selectedCat == "Text Editor" && !desc.Id.StartsWith("editor.", StringComparison.OrdinalIgnoreCase)) continue;
                 if (selectedCat == "Workbench" && !desc.Id.StartsWith("workbench.", StringComparison.OrdinalIgnoreCase)) continue;
-                if (selectedCat == "Extensions" && (desc.Id.StartsWith("editor.", StringComparison.OrdinalIgnoreCase) || desc.Id.StartsWith("workbench.", StringComparison.OrdinalIgnoreCase) || desc.Id.StartsWith("liveUnitTesting.", StringComparison.OrdinalIgnoreCase))) continue;
+                if (selectedCat == "AI Settings" && !desc.Id.StartsWith("ai.", StringComparison.OrdinalIgnoreCase)) continue;
+                if (selectedCat == "Extensions" && (desc.Id.StartsWith("editor.", StringComparison.OrdinalIgnoreCase) || desc.Id.StartsWith("workbench.", StringComparison.OrdinalIgnoreCase) || desc.Id.StartsWith("liveUnitTesting.", StringComparison.OrdinalIgnoreCase) || desc.Id.StartsWith("ai.", StringComparison.OrdinalIgnoreCase))) continue;
 
                 // Filter by query
                 if (!string.IsNullOrEmpty(query))

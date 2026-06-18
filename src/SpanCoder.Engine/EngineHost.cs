@@ -17,6 +17,7 @@ namespace SpanCoder.Engine
         private int _nextDocumentId = 1;
         private readonly ConcurrentDictionary<string, LspClient> _lspClients = new();
         private DapClient? _dapClient;
+        private readonly AiAgentCoordinator _aiCoordinator;
 
         public ChannelWriter<byte[]> Input => _inputChannel.Writer;
 
@@ -47,6 +48,7 @@ namespace SpanCoder.Engine
             });
             _documents = new ConcurrentDictionary<int, Document>();
             _cts = new CancellationTokenSource();
+            _aiCoordinator = new AiAgentCoordinator(responsePayload => MessageReceived?.Invoke(responsePayload));
             _workerThread = new Thread(ProcessLoop)
             {
                 IsBackground = true,
@@ -711,6 +713,19 @@ namespace SpanCoder.Engine
                         {
                             _dapClient?.SetBreakpoints(doc.FilePath, bps);
                         }
+                        break;
+                    }
+
+                case MessageTypes.AiChatRequest:
+                    {
+                        string requestJson = BinaryMessageSerializer.ParseStringPayload(message);
+                        _aiCoordinator.StartRequest(requestJson);
+                        break;
+                    }
+
+                case MessageTypes.AiStopCommand:
+                    {
+                        _aiCoordinator.StopActiveRequest();
                         break;
                     }
             }

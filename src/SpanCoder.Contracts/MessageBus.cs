@@ -35,6 +35,10 @@ namespace SpanCoder.Contracts
         public const byte DebugSetBreakpointsRequest = 28;
         public const byte DebugStoppedEvent = 29;
         public const byte DebugStateReport = 30;
+        public const byte AiChatRequest = 31;
+        public const byte AiChatResponse = 32;
+        public const byte AiToolExecutionEvent = 33;
+        public const byte AiStopCommand = 34;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -1226,6 +1230,42 @@ namespace SpanCoder.Contracts
                 throw new ArgumentException("Buffer too small", nameof(buffer));
 
             WriteHeader(buffer, MessageTypes.DebugContinueRequest, totalLength, documentId, 0);
+            return totalLength;
+        }
+
+        public static int WriteStringPayload(Span<byte> buffer, byte messageType, string payload)
+        {
+            int payloadBytesCount = payload.Length * sizeof(char);
+            int totalLength = HeaderSize + sizeof(int) + payloadBytesCount;
+
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, messageType, totalLength, 0, 0);
+            
+            int payloadLen = payload.Length;
+            MemoryMarshal.Write(buffer.Slice(HeaderSize, sizeof(int)), in payloadLen);
+
+            ReadOnlySpan<byte> payloadSpanBytes = MemoryMarshal.AsBytes(payload.AsSpan());
+            payloadSpanBytes.CopyTo(buffer.Slice(HeaderSize + sizeof(int)));
+
+            return totalLength;
+        }
+
+        public static string ParseStringPayload(ReadOnlySpan<byte> messageBuffer)
+        {
+            int payloadLen = MemoryMarshal.Read<int>(messageBuffer.Slice(HeaderSize, sizeof(int)));
+            ReadOnlySpan<byte> payloadBytes = messageBuffer.Slice(HeaderSize + sizeof(int), payloadLen * sizeof(char));
+            return new string(MemoryMarshal.Cast<byte, char>(payloadBytes));
+        }
+
+        public static int WriteAiStopCommand(Span<byte> buffer)
+        {
+            int totalLength = HeaderSize;
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.AiStopCommand, totalLength, 0, 0);
             return totalLength;
         }
     }

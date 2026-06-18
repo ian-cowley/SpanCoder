@@ -221,6 +221,15 @@ namespace SpanCoder.Shell
 
             _fileTree = new SidebarFileTree(this);
             _fileTree.FileSelected += OpenFile;
+            _fileTree.GitDiffSelected += (absolutePath) =>
+            {
+                if (!string.IsNullOrEmpty(_fileTree.RootPath))
+                {
+                    string baseDir = Directory.Exists(_fileTree.RootPath) ? _fileTree.RootPath : Path.GetDirectoryName(_fileTree.RootPath) ?? "";
+                    string relativePath = Path.GetRelativePath(baseDir, absolutePath).Replace("\\", "/");
+                    OpenGitDiffPage(relativePath);
+                }
+            };
             explorerGrid.Children.Add(_fileTree);
             Grid.SetRow(_fileTree, 1);
 
@@ -274,12 +283,7 @@ namespace SpanCoder.Shell
             {
                 if (_gitChangesList.SelectedItem is GitFileStatus status && !string.IsNullOrEmpty(_fileTree.RootPath))
                 {
-                    string baseDir = Directory.Exists(_fileTree.RootPath) ? _fileTree.RootPath : Path.GetDirectoryName(_fileTree.RootPath) ?? "";
-                    string fullPath = Path.Combine(baseDir, status.FilePath);
-                    if (File.Exists(fullPath))
-                    {
-                        OpenFile(fullPath);
-                    }
+                    OpenGitDiffPage(status.FilePath);
                 }
             };
 
@@ -325,6 +329,17 @@ namespace SpanCoder.Shell
             }, true);
 
             var gitContextMenu = new ContextMenu();
+
+            var menuDiff = new MenuItem { Header = "Open Git Diff" };
+            menuDiff.Click += (s, e) =>
+            {
+                if (_gitChangesList.SelectedItem is GitFileStatus status)
+                {
+                    OpenGitDiffPage(status.FilePath);
+                }
+            };
+            gitContextMenu.Items.Add(menuDiff);
+
             var menuStage = new MenuItem { Header = "Stage File" };
             menuStage.Click += async (s, e) =>
             {
@@ -4313,6 +4328,65 @@ namespace SpanCoder.Shell
             
             _openDocuments.Add(doc);
             SwitchToDocument(doc);
+        }
+
+        public void OpenGitDiffPage(string relativePath)
+        {
+            string diffUrl = $"gitdiff://{relativePath}";
+            var existing = _activePane.OpenDocuments.FirstOrDefault(d => d.FilePath.Equals(diffUrl, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                SwitchToDocument(existing);
+                return;
+            }
+
+            var docView = new ExtensionDocumentView(diffUrl);
+            var openDoc = new OpenDocument(-888, docView.FilePath, docView);
+            _activePane.OpenDocuments.Add(openDoc);
+            SwitchToDocument(openDoc);
+        }
+
+        public GitDiffControl CreateGitDiffView(string relativePath)
+        {
+            var control = new GitDiffControl(relativePath, _gitProvider, async () =>
+            {
+                await RefreshGitStatusAsync();
+            });
+
+            // Load contents asynchronously
+            Task.Run(async () =>
+            {
+                try
+                {
+                    string headContent = await _gitProvider.GetHeadFileContentAsync(relativePath);
+                    
+                    string baseDir = Directory.Exists(_fileTree.RootPath) ? _fileTree.RootPath : Path.GetDirectoryName(_fileTree.RootPath) ?? "";
+                    string fullPath = Path.Combine(baseDir, relativePath);
+                    string localContent = "";
+
+                    // If open in active/any pane, get it from memory to reflect unsaved edits
+                    var openDoc = _openDocuments.FirstOrDefault(d => d.FilePath.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
+                    if (openDoc != null && openDoc.Document != null)
+                    {
+                        localContent = GetDocumentText(openDoc.Document);
+                    }
+                    else if (File.Exists(fullPath))
+                    {
+                        localContent = await File.ReadAllTextAsync(fullPath);
+                    }
+
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        control.SetDiff(headContent, localContent);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ShellWindow] Failed to load diff for {relativePath}: {ex.Message}");
+                }
+            });
+
+            return control;
         }
 
         internal Control? CreateExtensionDetailsView(string extId)

@@ -239,6 +239,13 @@ namespace SpanCoder.Shell
             await RunGitCommandAsync("push");
         }
 
+        public async Task<string> GetHeadFileContentAsync(string relativePath)
+        {
+            if (string.IsNullOrEmpty(_workingDirectory)) return "";
+            string gitPath = relativePath.Replace("\\", "/");
+            return await RunGitCommandAsync($"show HEAD:\"{gitPath}\"");
+        }
+
         private async Task<string> RunGitCommandAsync(string args)
         {
             if (string.IsNullOrEmpty(_workingDirectory)) return "";

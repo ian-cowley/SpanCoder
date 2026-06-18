@@ -196,5 +196,58 @@ namespace SpanCoder.Tests
             Assert.True(window._sidebarTabControl.IsVisible);
             Assert.True(window._bottomTabControl.IsVisible);
         }
+
+        [Fact]
+        public void TestDiffAlgorithm()
+        {
+            string[] left = new[] { "line1", "line2", "line3" };
+            string[] right = new[] { "line1", "line2-mod", "line3", "line4" };
+
+            var diff = DiffAlgorithm.ComputeDiff(left, right);
+
+            // Expect:
+            // 1. Unchanged: line1
+            // 2. Deleted: line2 (from left)
+            // 3. Added: line2-mod (to right)
+            // 4. Unchanged: line3
+            // 5. Added: line4 (to right)
+            Assert.Equal(5, diff.Count);
+
+            Assert.Equal(DiffType.Unchanged, diff[0].Type);
+            Assert.Equal(1, diff[0].LeftLineNumber);
+            Assert.Equal(1, diff[0].RightLineNumber);
+
+            Assert.Equal(DiffType.Deleted, diff[1].Type);
+            Assert.Equal(2, diff[1].LeftLineNumber);
+            Assert.Null(diff[1].RightLineNumber);
+
+            Assert.Equal(DiffType.Added, diff[2].Type);
+            Assert.Null(diff[2].LeftLineNumber);
+            Assert.Equal(2, diff[2].RightLineNumber);
+
+            Assert.Equal(DiffType.Unchanged, diff[3].Type);
+            Assert.Equal(3, diff[3].LeftLineNumber);
+            Assert.Equal(3, diff[3].RightLineNumber);
+
+            Assert.Equal(DiffType.Added, diff[4].Type);
+            Assert.Null(diff[4].LeftLineNumber);
+            Assert.Equal(4, diff[4].RightLineNumber);
+        }
+
+        [AvaloniaFact]
+        public void TestOpenGitDiffPage()
+        {
+            var window = new ShellWindow();
+            window.InitializeLayout();
+
+            Assert.Empty(window._activePane.OpenDocuments);
+
+            window.OpenGitDiffPage("src/SpanCoder.Shell/ShellWindow.cs");
+
+            Assert.Single(window._activePane.OpenDocuments);
+            var doc = window._activePane.OpenDocuments[0];
+            Assert.Equal("gitdiff://src/SpanCoder.Shell/ShellWindow.cs", doc.FilePath);
+            Assert.Equal(-888, doc.Id);
+        }
     }
 }

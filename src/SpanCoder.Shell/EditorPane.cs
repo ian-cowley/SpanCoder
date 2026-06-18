@@ -255,8 +255,8 @@ namespace SpanCoder.Shell
                 VScroll.IsVisible = false;
                 HScroll.IsVisible = false;
 
-                // Remove existing Extension views if any
-                var extensionControls = EditorGrid.Children.Cast<Control>().Where(c => 
+                // Remove existing Custom views if any
+                var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
                     c != Canvas && 
                     c != VScroll && 
                     c != HScroll && 
@@ -265,7 +265,7 @@ namespace SpanCoder.Shell
                     c != _window._hoverBorder && 
                     c != _window._debugToolbar).ToList();
 
-                foreach (var ctrl in extensionControls)
+                foreach (var ctrl in customControls)
                 {
                     EditorGrid.Children.Remove(ctrl);
                 }
@@ -282,14 +282,14 @@ namespace SpanCoder.Shell
                     Grid.SetColumnSpan(extDetailsView, 2);
                 }
             }
-            else
+            else if (ActiveDocument != null && ActiveDocument.FilePath.StartsWith("gitdiff://"))
             {
-                Canvas.IsVisible = true;
-                VScroll.IsVisible = true;
-                HScroll.IsVisible = true;
+                Canvas.IsVisible = false;
+                VScroll.IsVisible = false;
+                HScroll.IsVisible = false;
 
-                // Remove existing Extension views if any
-                var extensionControls = EditorGrid.Children.Cast<Control>().Where(c => 
+                // Remove existing Custom views if any
+                var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
                     c != Canvas && 
                     c != VScroll && 
                     c != HScroll && 
@@ -298,7 +298,40 @@ namespace SpanCoder.Shell
                     c != _window._hoverBorder && 
                     c != _window._debugToolbar).ToList();
 
-                foreach (var ctrl in extensionControls)
+                foreach (var ctrl in customControls)
+                {
+                    EditorGrid.Children.Remove(ctrl);
+                }
+
+                // Create and add the new Git Diff view control!
+                var relPath = ActiveDocument.FilePath.Substring("gitdiff://".Length);
+                var gitDiffView = _window.CreateGitDiffView(relPath);
+                if (gitDiffView != null)
+                {
+                    EditorGrid.Children.Add(gitDiffView);
+                    Grid.SetRow(gitDiffView, 0);
+                    Grid.SetColumn(gitDiffView, 0);
+                    Grid.SetRowSpan(gitDiffView, 2);
+                    Grid.SetColumnSpan(gitDiffView, 2);
+                }
+            }
+            else
+            {
+                Canvas.IsVisible = true;
+                VScroll.IsVisible = true;
+                HScroll.IsVisible = true;
+
+                // Remove existing Custom views if any
+                var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
+                    c != Canvas && 
+                    c != VScroll && 
+                    c != HScroll && 
+                    !(c is FindReplaceOverlay) && 
+                    c != _window._autocompleteBorder && 
+                    c != _window._hoverBorder && 
+                    c != _window._debugToolbar).ToList();
+
+                foreach (var ctrl in customControls)
                 {
                     EditorGrid.Children.Remove(ctrl);
                 }

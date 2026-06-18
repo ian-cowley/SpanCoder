@@ -21,6 +21,7 @@ namespace SpanCoder.Shell
         private readonly ObservableCollection<TreeViewItem> _rootItems = new();
 
         public event Action<string>? FileSelected;
+        public event Action<string>? GitDiffSelected;
 
         private class SlnEntry
         {
@@ -978,6 +979,10 @@ namespace SpanCoder.Shell
             var openItem = new MenuItem { Header = "Open" };
             openItem.Click += (s, e) => FileSelected?.Invoke(filePath);
             menu.Items.Add(openItem);
+
+            var diffItem = new MenuItem { Header = "Open Git Diff" };
+            diffItem.Click += (s, e) => GitDiffSelected?.Invoke(filePath);
+            menu.Items.Add(diffItem);
 
             var revealItem = new MenuItem { Header = "Reveal in Explorer" };
             revealItem.Click += (s, e) => HandleRevealInExplorer(filePath);

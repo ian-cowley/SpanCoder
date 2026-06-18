@@ -3316,23 +3316,69 @@ namespace SpanCoder.Shell
                         string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                         string defaultOllamaPath = Path.Combine(localAppData, @"Programs\Ollama\ollama.exe");
                         bool useShell = false;
+                        bool isWslOllama = false;
 
-                        if (File.Exists(defaultOllamaPath))
+                        if (!File.Exists(defaultOllamaPath) && OperatingSystem.IsWindows())
                         {
-                            exePath = defaultOllamaPath;
+                            try
+                            {
+                                var wslCheckInfo = new System.Diagnostics.ProcessStartInfo
+                                {
+                                    FileName = "wsl",
+                                    Arguments = "which ollama",
+                                    RedirectStandardOutput = true,
+                                    CreateNoWindow = true,
+                                    UseShellExecute = false
+                                };
+                                using var checkProc = System.Diagnostics.Process.Start(wslCheckInfo);
+                                if (checkProc != null)
+                                {
+                                    string output = checkProc.StandardOutput.ReadToEnd();
+                                    checkProc.WaitForExit();
+                                    if (checkProc.ExitCode == 0 && output.Contains("ollama"))
+                                    {
+                                        isWslOllama = true;
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // WSL not available
+                            }
+                        }
+
+                        System.Diagnostics.ProcessStartInfo startInfo;
+                        if (isWslOllama)
+                        {
+                            startInfo = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "wsl",
+                                Arguments = "ollama serve",
+                                CreateNoWindow = true,
+                                UseShellExecute = false
+                            };
+                            Console.WriteLine("[ShellWindow] Detected Ollama in WSL. Launching 'wsl ollama serve'...");
                         }
                         else
                         {
-                            useShell = true;
+                            if (File.Exists(defaultOllamaPath))
+                            {
+                                exePath = defaultOllamaPath;
+                            }
+                            else
+                            {
+                                useShell = true;
+                            }
+
+                            startInfo = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = exePath,
+                                Arguments = "serve",
+                                CreateNoWindow = true,
+                                UseShellExecute = useShell
+                            };
                         }
 
-                        var startInfo = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = exePath,
-                            Arguments = "serve",
-                            CreateNoWindow = true,
-                            UseShellExecute = useShell
-                        };
                         System.Diagnostics.Process.Start(startInfo);
                         
                         // Wait a few seconds for the service to start

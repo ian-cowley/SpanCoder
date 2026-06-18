@@ -374,7 +374,7 @@ Interactive debugging features are integrated into the main shell via several de
 * [x] **Context-Aware Right-Click Menu & Selection**: Added right-click context menu (Cut/Copy/Paste, Breakpoint, Go to Definition, etc.), custom extension item support, and double/triple click selection actions.
 
 ### Phase 3: Remote Development & Collaboration
-* [ ] **Remote Engine Host**: Allow `SpanCoder.App` to run locally while connecting to a remote `SpanCoder.Engine` daemon running on a Linux server or in a Docker DevContainer.
+* [x] **Remote Engine Host**: Allow `SpanCoder.App` to run locally while connecting to a remote `SpanCoder.Engine` daemon running on a Linux server or in a Docker DevContainer.
 * [ ] **Real-Time Collaborative Coding**: Synchronize piece-table buffers between multiple developers using low-latency CRDT (Conflict-free Replicated Data Types) protocols over WebSockets.
 
 ---
@@ -416,6 +416,21 @@ Execute the xUnit tests suite:
 ```bash
 dotnet test
 ```
+
+### Remote Development (Remote Engine Host Mode)
+SpanCoder supports running the frontend app locally while connecting to a remote engine daemon (e.g. inside a Docker container, WSL, or on a remote Linux server).
+
+1. **Start the Engine Daemon (Remote Host / WSL / Linux)**:
+   Launch the engine process in listening mode:
+   ```bash
+   ./SpanCoder.Engine --listen --port 5001
+   ```
+2. **Start the App (Local Host)**:
+   Launch the shell UI in connection mode, specifying the target host and port, along with local-to-remote path mapping:
+   ```bash
+   dotnet run --project src/SpanCoder.App/SpanCoder.App.csproj -- --connect 127.0.0.1:5001 --map-path "C:\local\workspace=/remote/workspace"
+   ```
+   * The `--map-path` spec allows the client UI to operate on a local folder mount or volume while the remote engine executes compilations, LSP checks, and debugging commands on the remote Linux paths seamlessly.
 
 ### Native AOT Compilation (AOT Publish)
 To compile a single, zero-dependency executable file with sub-millisecond cold start times, run:

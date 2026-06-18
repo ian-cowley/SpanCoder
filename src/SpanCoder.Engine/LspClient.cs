@@ -21,6 +21,7 @@ namespace SpanCoder.Engine
 
         private void Log(string message)
         {
+            SpanCoder.Contracts.LogHelper.Log($"[LspClient] {message}");
         }
 
         public LspClient(string workspacePath, Action<string, DiagnosticItem[]> onDiagnostics)

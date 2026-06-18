@@ -225,7 +225,7 @@ namespace SpanCoder.Engine
                     diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{todoIdx}}},\"end\":{{\"line\":{i},\"character\":{todoIdx + 4}}}}},\"severity\":2,\"message\":\"TODO comment found\"}}");
                 }
 
-                if (line.Trim().StartsWith("var ", StringComparison.Ordinal) && !line.Trim().EndsWith(";", StringComparison.Ordinal))
+                if (line.Trim().StartsWith("var ", StringComparison.Ordinal) && IsVarMissingSemicolon(lines, i))
                 {
                     if (!first) diagnosticsList.Append(",");
                     first = false;
@@ -246,6 +246,97 @@ namespace SpanCoder.Engine
 
             string notificationJson = $"{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":\"{uri}\",\"diagnostics\":{diagnosticsList.ToString()}}}}}";
             SendNotification(stdout, notificationJson);
+        }
+
+        private static bool IsVarMissingSemicolon(string[] lines, int startIndex)
+        {
+            int parens = 0;
+            int braces = 0;
+            int brackets = 0;
+            bool inString = false;
+            bool inChar = false;
+
+            for (int idx = startIndex; idx < lines.Length; idx++)
+            {
+                string line = lines[idx];
+                string trimmed = line.Trim();
+
+                if (idx > startIndex && parens == 0 && braces == 0 && brackets == 0)
+                {
+                    if (trimmed.StartsWith("public ", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("private ", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("protected ", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("internal ", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("void ", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("class ", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("using ", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("var ", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("return ", StringComparison.Ordinal) ||
+                        trimmed == "}" || trimmed == "")
+                    {
+                        return true;
+                    }
+                }
+
+                for (int c = 0; c < line.Length; c++)
+                {
+                    char ch = line[c];
+
+                    if (!inString && !inChar && ch == '/' && c + 1 < line.Length && line[c + 1] == '/')
+                    {
+                        break;
+                    }
+
+                    if (inString)
+                    {
+                        if (ch == '"' && (c == 0 || line[c - 1] != '\\'))
+                        {
+                            inString = false;
+                        }
+                        continue;
+                    }
+                    if (inChar)
+                    {
+                        if (ch == '\'' && (c == 0 || line[c - 1] != '\\'))
+                        {
+                            inChar = false;
+                        }
+                        continue;
+                    }
+
+                    if (ch == '"')
+                    {
+                        inString = true;
+                        continue;
+                    }
+                    if (ch == '\'')
+                    {
+                        inChar = true;
+                        continue;
+                    }
+
+                    if (ch == '(') parens++;
+                    else if (ch == ')') parens = Math.Max(0, parens - 1);
+                    else if (ch == '{') braces++;
+                    else if (ch == '}') braces = Math.Max(0, braces - 1);
+                    else if (ch == '[') brackets++;
+                    else if (ch == ']') brackets = Math.Max(0, brackets - 1);
+                    else if (ch == ';')
+                    {
+                        if (parens == 0 && braces == 0 && brackets == 0)
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                if (idx == lines.Length - 1)
+                {
+                    return true;
+                }
+            }
+
+            return true;
         }
 
         private static string GetMockCompletions(string? text, int line, int character)

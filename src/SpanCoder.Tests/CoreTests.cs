@@ -473,6 +473,65 @@ namespace SpanCoder.Tests
         }
 
         [Fact]
+        public void TestLspMockSemicolonDiagnostics()
+        {
+            using var connection = new SpanCoder.App.IpcEngineConnection();
+            connection.Start();
+
+            bool receivedDiagnostics = false;
+            System.Collections.Generic.List<DiagnosticItem>? reportedDiags = null;
+
+            connection.MessageReceived += (msg) =>
+            {
+                if (BinaryMessageSerializer.TryParseHeader(msg, out var header))
+                {
+                    if (header.Type == MessageTypes.DiagnosticsReport)
+                    {
+                        var diags = BinaryMessageSerializer.ParseDiagnosticsReport(msg, out _);
+                        reportedDiags = diags;
+                        receivedDiagnostics = true;
+                    }
+                }
+            };
+
+            string tempFile = Path.Combine(Path.GetTempPath(), "lsp_integration_test_semicolon.cs");
+            string fileContent = 
+                "using System;\n" +
+                "var methodProvider = context.SyntaxProvider.CreateSyntaxProvider(\n" +
+                "    (node, _) => node is MethodDeclarationSyntax && ((MethodDeclarationSyntax)node).AttributeLists.Count > 0,\n" +
+                "    (ctx, _) => GetCommandMethodInfo(ctx)\n" +
+                ").Where(m => m != null).Select((m, _) => m!);\n" +
+                "\n" +
+                "var invalidVar = 456\n";
+
+            File.WriteAllText(tempFile, fileContent);
+
+            try
+            {
+                byte[] loadMsg = new byte[BinaryMessageSerializer.HeaderSize + 4 + tempFile.Length * 2];
+                BinaryMessageSerializer.WriteLoadFile(loadMsg, tempFile);
+                connection.Send(loadMsg);
+
+                int retries = 0;
+                while (!receivedDiagnostics && retries++ < 60)
+                {
+                    System.Threading.Thread.Sleep(100);
+                }
+
+                Assert.True(receivedDiagnostics, "Diagnostics report not received");
+                Assert.NotNull(reportedDiags);
+
+                var semicolonDiags = System.Linq.Enumerable.ToList(System.Linq.Enumerable.Where(reportedDiags, d => d.Message.Contains("; expected")));
+                Assert.Single(semicolonDiags);
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                    File.Delete(tempFile);
+            }
+        }
+
+        [Fact]
         public void TestIpcEngineConnectionBatchEdit()
         {
             using var connection = new SpanCoder.App.IpcEngineConnection();

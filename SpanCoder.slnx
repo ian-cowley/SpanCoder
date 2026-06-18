@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SpanCoder.App/SpanCoder.App.csproj" />
+    <Project Path="src/SpanCoder.Contracts/SpanCoder.Contracts.csproj" />
+    <Project Path="src/SpanCoder.Engine/SpanCoder.Engine.csproj" />
+    <Project Path="src/SpanCoder.Shell/SpanCoder.Shell.csproj" />
+    <Project Path="src/SpanCoder.Tests/SpanCoder.Tests.csproj" />
+    <Project Path="src/SpanCoder.Extensions.Languages/SpanCoder.Extensions.Languages.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/SpanCoder.SourceGenerators/SpanCoder.SourceGenerators.csproj" />
+  </Folder>
+</Solution>

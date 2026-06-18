@@ -1,0 +1,24 @@
+## Visual Studio & Dotnet Build Artifacts
+[Oo]bj/
+[Bb]in/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.slnx.docstates
+.vs/
+
+## Custom local NuGet feed
+nuget-local/
+
+## IDE / Editors (Rider, VS Code)
+.idea/
+.vscode/
+*.DotSettings.user
+
+## OS Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini

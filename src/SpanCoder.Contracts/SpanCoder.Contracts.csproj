@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <IsTrimmable>true</IsTrimmable>
+    <PackageId>SpanCoder.Contracts</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>SpanCoder Team</Authors>
+    <Description>Contracts and serialization library for SpanCoder IDE extensions.</Description>
+  </PropertyGroup>
+
+</Project>

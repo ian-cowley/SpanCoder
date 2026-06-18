@@ -488,18 +488,21 @@ EndGlobal
     [AvaloniaFact]
     public void TestGetNamespaceForFolder()
     {
-        string projectPath = @"C:\Users\spuri\source\repos\PolarsPlus\Glacier.SpanCoder\src\SpanCoder.Shell\SpanCoder.Shell.csproj";
+        string projectPath = Path.Combine(Path.GetTempPath(), "source", "repos", "PolarsPlus", "Glacier.SpanCoder", "src", "SpanCoder.Shell", "SpanCoder.Shell.csproj");
+        string shellDir = Path.Combine(Path.GetTempPath(), "source", "repos", "PolarsPlus", "Glacier.SpanCoder", "src", "SpanCoder.Shell");
+        string panelsDir = Path.Combine(shellDir, "Views", "Panels");
+        string specialDir = Path.Combine(shellDir, "Views-Special", "Panels+Test");
         
         // Same directory
-        string ns1 = SidebarFileTree.GetNamespaceForFolder(projectPath, @"C:\Users\spuri\source\repos\PolarsPlus\Glacier.SpanCoder\src\SpanCoder.Shell");
+        string ns1 = SidebarFileTree.GetNamespaceForFolder(projectPath, shellDir);
         Assert.Equal("SpanCoder.Shell", ns1);
 
         // Subdirectory
-        string ns2 = SidebarFileTree.GetNamespaceForFolder(projectPath, @"C:\Users\spuri\source\repos\PolarsPlus\Glacier.SpanCoder\src\SpanCoder.Shell\Views\Panels");
+        string ns2 = SidebarFileTree.GetNamespaceForFolder(projectPath, panelsDir);
         Assert.Equal("SpanCoder.Shell.Views.Panels", ns2);
 
         // Subdirectory with invalid C# characters in folder name
-        string ns3 = SidebarFileTree.GetNamespaceForFolder(projectPath, @"C:\Users\spuri\source\repos\PolarsPlus\Glacier.SpanCoder\src\SpanCoder.Shell\Views-Special\Panels+Test");
+        string ns3 = SidebarFileTree.GetNamespaceForFolder(projectPath, specialDir);
         Assert.Equal("SpanCoder.Shell.ViewsSpecial.PanelsTest", ns3);
     }
 

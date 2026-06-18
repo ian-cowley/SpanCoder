@@ -129,8 +129,24 @@ namespace SpanCoder.Shell
         private readonly System.Collections.Generic.List<ExtraCaret> _extraCarets = new();
         public System.Collections.Generic.IReadOnlyList<ExtraCaret> ExtraCarets => _extraCarets;
 
+        public class RemoteCaretState
+        {
+            public string ClientId { get; set; } = "";
+            public string Username { get; set; } = "";
+            public int Line { get; set; }
+            public int Character { get; set; }
+            public int SelectionStartOffset { get; set; }
+            public int SelectionEndOffset { get; set; }
+            public string ColorHex { get; set; } = "#FF0000";
+        }
+
+        private readonly System.Collections.Generic.Dictionary<string, RemoteCaretState> _remoteCursors = new();
+        public System.Collections.Generic.IReadOnlyDictionary<string, RemoteCaretState> RemoteCursors => _remoteCursors;
+
         private int _selectionStartOffset = -1;
         private int _selectionEndOffset = -1;
+        public int SelectionStartOffset => _selectionStartOffset;
+        public int SelectionEndOffset => _selectionEndOffset;
         private bool _isDragging;
         private bool _isBlockDragging;
         private int _blockDragStartLine;
@@ -545,6 +561,34 @@ namespace SpanCoder.Shell
                 }
             }
             MoveCaretToOffset(caretOffset);
+            InvalidateVisual();
+        }
+
+        public void UpdateRemoteCursor(string clientId, string username, int line, int character, int selStart, int selEnd, string colorHex)
+        {
+            if (line < 0 || character < 0)
+            {
+                _remoteCursors.Remove(clientId);
+            }
+            else
+            {
+                _remoteCursors[clientId] = new RemoteCaretState
+                {
+                    ClientId = clientId,
+                    Username = username,
+                    Line = line,
+                    Character = character,
+                    SelectionStartOffset = selStart,
+                    SelectionEndOffset = selEnd,
+                    ColorHex = colorHex
+                };
+            }
+            InvalidateVisual();
+        }
+
+        public void ClearRemoteCursors()
+        {
+            _remoteCursors.Clear();
             InvalidateVisual();
         }
 
@@ -1663,6 +1707,41 @@ namespace SpanCoder.Shell
                     }
                 }
 
+                // --- Draw Remote Selection Highlights ---
+                foreach (var remote in _remoteCursors.Values)
+                {
+                    int rMin = Math.Min(remote.SelectionStartOffset, remote.SelectionEndOffset);
+                    int rMax = Math.Max(remote.SelectionStartOffset, remote.SelectionEndOffset);
+                    if (rMin != -1 && rMax != -1 && rMin != rMax)
+                    {
+                        long lineStartOffset = doc.GetLineStart(i);
+                        long lineEndOffset = (i + 1 < lineCount) ? doc.GetLineStart(i + 1) : doc.Length;
+                        if (lineStartOffset < rMax && lineEndOffset > rMin)
+                        {
+                            int selStartInLine = Math.Max((int)lineStartOffset, rMin) - (int)lineStartOffset;
+                            int selEndInLine = Math.Min((int)lineEndOffset, rMax) - (int)lineStartOffset;
+
+                            int startCol = Math.Min(renderLen, selStartInLine);
+                            int endCol = Math.Min(renderLen, selEndInLine);
+
+                            double startX = gutterWidth + 10 + startCol * CharWidth - ScrollX;
+                            double endX = gutterWidth + 10 + endCol * CharWidth - ScrollX;
+
+                            if (selEndInLine > renderLen && i + 1 < lineCount)
+                            {
+                                endX += CharWidth;
+                            }
+
+                            if (endX > startX)
+                            {
+                                double y = (v * LineHeight) - ScrollY;
+                                Color c = Color.Parse(remote.ColorHex);
+                                context.FillRectangle(new SolidColorBrush(Color.FromArgb(40, c.R, c.G, c.B)), new Rect(startX, y, endX - startX, LineHeight));
+                            }
+                        }
+                    }
+                }
+
                 bool hasGhost = i == CaretLine && !string.IsNullOrEmpty(GhostText) && CaretAbsoluteOffset == GhostTextOffset;
                 if (renderLen > 0 || hasGhost)
                 {
@@ -1779,6 +1858,46 @@ namespace SpanCoder.Shell
                         {
                             context.DrawLine(pen, new Point(caretX, caretY + 2), new Point(caretX, caretY + LineHeight - 2));
                         }
+                    }
+                }
+            }
+
+            // Render Remote Carets and Name Badges
+            foreach (var remote in _remoteCursors.Values)
+            {
+                int remoteVisibleIndex = _docToVisualLine.Length > remote.Line ? _docToVisualLine[remote.Line] : remote.Line;
+                if (remoteVisibleIndex >= startVisibleIndex && remoteVisibleIndex <= endVisibleIndex)
+                {
+                    double caretX = gutterWidth + 10 + (remote.Character * CharWidth) - ScrollX;
+                    double caretY = (remoteVisibleIndex * LineHeight) - ScrollY;
+                    
+                    Color c = Color.Parse(remote.ColorHex);
+                    var brush = new SolidColorBrush(c);
+                    var pen = new Pen(brush, 2.0);
+
+                    // Draw vertical caret line
+                    context.DrawLine(pen, new Point(caretX, caretY + 2), new Point(caretX, caretY + LineHeight - 2));
+
+                    // Draw Username Badge
+                    if (!string.IsNullOrEmpty(remote.Username))
+                    {
+                        var formattedName = new FormattedText(
+                            remote.Username,
+                            CultureInfo.InvariantCulture,
+                            FlowDirection.LeftToRight,
+                            _typeface,
+                            8.0,
+                            Brushes.Black
+                        );
+                        
+                        double badgeW = formattedName.Width + 6;
+                        double badgeH = 12;
+                        double badgeX = caretX;
+                        double badgeY = caretY - 10;
+
+                        // Draw background badge bubble
+                        context.FillRectangle(brush, new Rect(badgeX, badgeY, badgeW, badgeH), 2.0f);
+                        context.DrawText(formattedName, new Point(badgeX + 3, badgeY + 1));
                     }
                 }
             }

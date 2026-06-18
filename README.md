@@ -375,7 +375,7 @@ Interactive debugging features are integrated into the main shell via several de
 
 ### Phase 3: Remote Development & Collaboration
 * [x] **Remote Engine Host**: Allow `SpanCoder.App` to run locally while connecting to a remote `SpanCoder.Engine` daemon running on a Linux server or in a Docker DevContainer.
-* [ ] **Real-Time Collaborative Coding**: Synchronize piece-table buffers between multiple developers using low-latency CRDT (Conflict-free Replicated Data Types) protocols over WebSockets.
+* [x] **Real-Time Collaborative Coding**: Synchronize piece-table buffers between multiple developers using low-latency CRDT (Conflict-free Replicated Data Types) protocols over WebSockets.
 
 ---
 
@@ -431,6 +431,24 @@ SpanCoder supports running the frontend app locally while connecting to a remote
    dotnet run --project src/SpanCoder.App/SpanCoder.App.csproj -- --connect 127.0.0.1:5001 --map-path "C:\local\workspace=/remote/workspace"
    ```
    * The `--map-path` spec allows the client UI to operate on a local folder mount or volume while the remote engine executes compilations, LSP checks, and debugging commands on the remote Linux paths seamlessly.
+
+### Real-Time Collaboration Mode
+SpanCoder allows multiple developers to edit the same file simultaneously using a low-latency, conflict-free sequence CRDT protocol over WebSockets.
+
+1. **Host a Session**:
+   - In the menu bar, navigate to **Collab -> Host Collaboration Session**.
+   - Input your username and a port to listen on (e.g., `5080`).
+   - Click **Host**. The editor will start the collaboration server and automatically connect your local editor instance.
+
+2. **Join a Session**:
+   - In the menu bar, navigate to **Collab -> Join Collaboration Session**.
+   - Input your username and the host's IP address and port (e.g., `127.0.0.1:5080`).
+   - Click **Join**. Your document buffer will immediately synchronize with the host.
+
+3. **Collaboration Features**:
+   - **Real-Time Cursor/Selection Rendering**: Remote cursors appear as colored carets with floating username badges, and selections render as semi-transparent highlights in real time.
+   - **Conflict-free Edits**: The document remains responsive with local edits applied immediately, while remote concurrent updates merge using fractional indexing CRDT to guarantee convergent document states.
+   - **Disconnect**: Terminate or leave a session at any time via **Collab -> Disconnect**.
 
 ### Native AOT Compilation (AOT Publish)
 To compile a single, zero-dependency executable file with sub-millisecond cold start times, run:

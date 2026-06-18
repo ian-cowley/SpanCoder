@@ -56,6 +56,8 @@ namespace SpanCoder.Shell
         private PtyHost? _terminalPty;
 
         private IEngineConnection? _engine;
+        private CollabServer? _collabServer;
+        private CollabClient? _collabClient;
         private string _currentFilePath = "Untitled";
         private System.Diagnostics.Stopwatch? _startupStopwatch;
 
@@ -1793,9 +1795,177 @@ namespace SpanCoder.Shell
 
         [Command("File.Exit", "Exit", "File", "Alt+F4")]
         [MenuItem("File.Exit", "File/Exit", 100)]
-        public static void ExitAppCommand(ShellWindow window)
+        public static void ExitCommand(ShellWindow window)
         {
             window.Close();
+        }
+
+        [MenuItem("Collab.Host", "Collab/Host Collaboration Session", 10)]
+        public static void HostCollabCommand(ShellWindow window)
+        {
+            _ = window.HostCollabSessionAsync();
+        }
+
+        [MenuItem("Collab.Join", "Collab/Join Collaboration Session", 20)]
+        public static void JoinCollabCommand(ShellWindow window)
+        {
+            _ = window.JoinCollabSessionAsync();
+        }
+
+        [MenuItem("Collab.Disconnect", "Collab/Disconnect Session", 30)]
+        public static void DisconnectCollabCommand(ShellWindow window)
+        {
+            window.DisconnectCollabSession();
+        }
+
+        public async Task HostCollabSessionAsync()
+        {
+            var dialog = new CollabSetupWindow(true);
+            await dialog.ShowDialog(this);
+            if (dialog.IsCancelled) return;
+
+            try
+            {
+                DisconnectCollabSession();
+
+                _collabServer = new CollabServer(dialog.Port);
+                _collabServer.Start();
+
+                if (_activeDocument != null && _activeDocument.Document != null)
+                {
+                    string text = GetDocumentText(_activeDocument.Document);
+                    for (int i = 0; i < text.Length; i++)
+                    {
+                        _collabServer.Document.LocalInsert(i, text[i]);
+                    }
+                }
+
+                _collabClient = new CollabClient(dialog.Username);
+                SetupCollabClientHandlers();
+
+                await _collabClient.ConnectAsync("127.0.0.1", dialog.Port);
+                _statusBar.Text = $"Collab: Hosting on port {dialog.Port} as '{dialog.Username}'";
+            }
+            catch (Exception ex)
+            {
+                _statusBar.Text = $"Collab error: {ex.Message}";
+            }
+        }
+
+        public async Task JoinCollabSessionAsync()
+        {
+            var dialog = new CollabSetupWindow(false);
+            await dialog.ShowDialog(this);
+            if (dialog.IsCancelled) return;
+
+            try
+            {
+                DisconnectCollabSession();
+
+                _collabClient = new CollabClient(dialog.Username);
+                SetupCollabClientHandlers();
+
+                await _collabClient.ConnectAsync(dialog.HostIp, dialog.Port);
+                _statusBar.Text = $"Collab: Connected to {dialog.HostIp}:{dialog.Port} as '{dialog.Username}'";
+            }
+            catch (Exception ex)
+            {
+                _statusBar.Text = $"Collab error: {ex.Message}";
+            }
+        }
+
+        public void DisconnectCollabSession()
+        {
+            if (_collabClient != null)
+            {
+                _collabClient.Disconnect();
+                _collabClient.Dispose();
+                _collabClient = null;
+            }
+
+            if (_collabServer != null)
+            {
+                _collabServer.Stop();
+                _collabServer = null;
+            }
+
+            foreach (var pane in _editorPanes)
+            {
+                pane.Canvas.ClearRemoteCursors();
+            }
+
+            _statusBar.Text = "Collab: Session disconnected.";
+        }
+
+        private void SetupCollabClientHandlers()
+        {
+            if (_collabClient == null) return;
+
+            _collabClient.SyncReceived += (syncedText) =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_activeDocument != null)
+                    {
+                        SyncCollabDocumentText(_activeDocument.Id, syncedText);
+                    }
+                });
+            };
+
+            _collabClient.RemoteInsertReceived += (visibleOffset, val) =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_activeDocument != null && _engine != null)
+                    {
+                        byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + 2];
+                        BinaryMessageSerializer.WriteInsertText(buffer, _activeDocument.Id, visibleOffset, val.ToString());
+                        _engine.Send(buffer);
+                    }
+                });
+            };
+
+            _collabClient.RemoteDeleteReceived += (visibleOffset) =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_activeDocument != null && _engine != null)
+                    {
+                        byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4];
+                        BinaryMessageSerializer.WriteDeleteText(buffer, _activeDocument.Id, visibleOffset, 1);
+                        _engine.Send(buffer);
+                    }
+                });
+            };
+
+            _collabClient.RemoteCursorMoved += (msg) =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    foreach (var pane in _editorPanes)
+                    {
+                        pane.Canvas.UpdateRemoteCursor(msg.ClientId, msg.Username, msg.Line, msg.Character, msg.SelectionStartOffset, msg.SelectionEndOffset, msg.ColorHex);
+                    }
+                });
+            };
+        }
+
+        private void SyncCollabDocumentText(int docId, string syncedText)
+        {
+            if (_engine == null) return;
+            var doc = _engine.GetDocument(docId);
+            if (doc == null) return;
+
+            var edits = new[]
+            {
+                new TextEdit { Offset = 0, DeleteLength = doc.Length, Text = syncedText }
+            };
+
+            byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + sizeof(int) * 3 + syncedText.Length * sizeof(char)];
+            int len = BinaryMessageSerializer.WriteBatchEditRequest(buffer, docId, edits);
+            byte[] finalBuffer = new byte[len];
+            Array.Copy(buffer, 0, finalBuffer, 0, len);
+            _engine.Send(finalBuffer);
         }
 
         public async void TriggerOpenFile()
@@ -2239,6 +2409,14 @@ namespace SpanCoder.Shell
                 byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + text.Length * 2];
                 BinaryMessageSerializer.WriteInsertText(buffer, canvas.Document.Id, offset, text);
                 _engine.Send(buffer);
+
+                if (_collabClient != null && _collabClient.IsConnected)
+                {
+                    for (int i = 0; i < text.Length; i++)
+                    {
+                        _ = _collabClient.SendInsertAsync(offset + i, text[i]);
+                    }
+                }
             };
 
             canvas.TextDeleteReceived += (offset, len) =>
@@ -2247,6 +2425,14 @@ namespace SpanCoder.Shell
                 byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4];
                 BinaryMessageSerializer.WriteDeleteText(buffer, canvas.Document.Id, offset, len);
                 _engine.Send(buffer);
+
+                if (_collabClient != null && _collabClient.IsConnected)
+                {
+                    for (int i = 0; i < len; i++)
+                    {
+                        _ = _collabClient.SendDeleteAsync(offset);
+                    }
+                }
             };
 
             canvas.BatchEditReceived += (edits) =>
@@ -2270,7 +2456,14 @@ namespace SpanCoder.Shell
                 _engine.Send(finalBuffer);
             };
 
-            canvas.CaretMoved += UpdateStatusBar;
+            canvas.CaretMoved += () =>
+            {
+                UpdateStatusBar();
+                if (_collabClient != null && _collabClient.IsConnected && canvas.Document != null)
+                {
+                    _ = _collabClient.SendCursorAsync(canvas.CaretLine, canvas.CaretCol, canvas.SelectionStartOffset, canvas.SelectionEndOffset);
+                }
+            };
             canvas.VimModeChanged += UpdateStatusBar;
 
             canvas.AutocompleteRequested += (offset) =>
@@ -3118,6 +3311,8 @@ namespace SpanCoder.Shell
                 }
                 return;
             }
+
+            DisconnectCollabSession();
 
             base.OnClosing(e);
 

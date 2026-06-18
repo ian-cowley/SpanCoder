@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SpanCoder.Contracts" Version="1.0.0" />
+    <ProjectReference Include="..\SpanCoder.Contracts\SpanCoder.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

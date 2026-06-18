@@ -9,6 +9,8 @@ namespace SpanCoder.Extensions.Languages
 {
     class Program
     {
+        private static readonly System.Threading.SemaphoreSlim _writeLock = new(1, 1);
+
         static async Task Main(string[] args)
         {
             int port = 0;
@@ -45,14 +47,14 @@ namespace SpanCoder.Extensions.Languages
                     return;
                 }
 
+                string token = Environment.GetEnvironmentVariable("SPANCODER_EXT_TOKEN") ?? "";
                 string manifestJson = File.ReadAllText(manifestPath);
                 byte[] jsonBytes = Encoding.UTF8.GetBytes(manifestJson);
-                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + jsonBytes.Length];
-                int len = BinaryMessageSerializer.WriteRegisterExtension(buffer, jsonBytes);
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
+                int len = BinaryMessageSerializer.WriteRegisterExtension(buffer, token, jsonBytes);
 
                 Console.WriteLine("[LanguagesPlugin] Registering extension...");
-                await stream.WriteAsync(buffer, 0, len);
-                await stream.FlushAsync();
+                await SendMessageAsync(stream, buffer, len);
 
                 // Start Read Loop
                 byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
@@ -77,6 +79,44 @@ namespace SpanCoder.Extensions.Languages
                     {
                         string commandId = BinaryMessageSerializer.ParseExecuteExtensionCommand(payload);
                         Console.WriteLine($"[LanguagesPlugin] Received command: {commandId}");
+
+                        if (commandId == "languages.runPython")
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await UpdateStatusBarAsync(stream, "languages-status", "Py: Running...", "Python script is executing");
+                                    await Task.Delay(1500);
+                                    await UpdateStatusBarAsync(stream, "languages-status", "Py/Cargo: Idle", "Languages extension is ready");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[LanguagesPlugin] Error updating status bar: {ex.Message}");
+                                }
+                            });
+                        }
+                        else if (commandId == "languages.cargoBuild")
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await UpdateStatusBarAsync(stream, "languages-status", "Cargo: Building...", "Cargo build is executing");
+                                    await Task.Delay(1500);
+                                    await UpdateStatusBarAsync(stream, "languages-status", "Py/Cargo: Idle", "Languages extension is ready");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[LanguagesPlugin] Error updating status bar: {ex.Message}");
+                                }
+                            });
+                        }
+                    }
+                    else if (header.Type == MessageTypes.ExtensionSettingChanged)
+                    {
+                        BinaryMessageSerializer.ParseExtensionSettingChanged(payload, out string settingId, out string value);
+                        Console.WriteLine($"[LanguagesPlugin] Setting changed: {settingId} = {value}");
                     }
                 }
             }
@@ -89,6 +129,27 @@ namespace SpanCoder.Extensions.Languages
                 stream?.Dispose();
                 client?.Dispose();
             }
+        }
+
+        private static async Task SendMessageAsync(NetworkStream stream, byte[] buffer, int length)
+        {
+            await _writeLock.WaitAsync();
+            try
+            {
+                await stream.WriteAsync(buffer, 0, length);
+                await stream.FlushAsync();
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+
+        private static async Task UpdateStatusBarAsync(NetworkStream stream, string itemId, string text, string tooltip = "", string commandId = "")
+        {
+            byte[] temp = new byte[BinaryMessageSerializer.HeaderSize + 16 + (itemId.Length + text.Length + tooltip.Length + commandId.Length) * sizeof(char)];
+            int len = BinaryMessageSerializer.WriteUpdateExtensionStatusBarItem(temp, itemId, text, tooltip, commandId);
+            await SendMessageAsync(stream, temp, len);
         }
 
         private static async Task<int> ReadExactlyAsync(NetworkStream stream, byte[] buffer, int offset, int count)

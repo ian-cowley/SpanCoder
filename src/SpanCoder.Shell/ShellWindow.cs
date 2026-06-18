@@ -41,6 +41,7 @@ namespace SpanCoder.Shell
         public TextEditorCanvas ActiveCanvas => _canvas;
 
         private TextBlock _statusBar = null!;
+        private StackPanel _statusBarExtensionPanel = null!;
         
         private Border _debugToolbar = null!;
         private ListBox _debugVariablesList = null!;
@@ -73,6 +74,7 @@ namespace SpanCoder.Shell
         private readonly Dictionary<string, TextBlock> _pluginPanels = new();
         private readonly Dictionary<string, string> _commandToExtensionMap = new();
         private readonly List<CommandDescriptor> _extensionCommands = new();
+        private readonly Dictionary<string, Border> _extensionStatusBarItems = new(StringComparer.OrdinalIgnoreCase);
         private CommandPalette _commandPalette = null!;
         
         private SidebarFileTree _fileTree = null!;
@@ -920,18 +922,37 @@ namespace SpanCoder.Shell
             mainGrid.Children.Add(workspaceGrid);
             Grid.SetRow(workspaceGrid, 2);
 
-            // 3. Status Bar
-            _statusBar = new TextBlock
+            // 3. Status Bar Container
+            var statusBarGrid = new Grid
             {
                 Background = new SolidColorBrush(Color.Parse("#1A1A1A")),
+                Height = 22
+            };
+            statusBarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Left status text
+            statusBarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Right extension controls
+
+            _statusBar = new TextBlock
+            {
                 Foreground = Brushes.DarkGray,
-                Height = 22,
                 Padding = new Thickness(8, 2),
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize = 12
             };
-            mainGrid.Children.Add(_statusBar);
-            Grid.SetRow(_statusBar, 3);
+            statusBarGrid.Children.Add(_statusBar);
+            Grid.SetColumn(_statusBar, 0);
+
+            _statusBarExtensionPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            statusBarGrid.Children.Add(_statusBarExtensionPanel);
+            Grid.SetColumn(_statusBarExtensionPanel, 1);
+
+            mainGrid.Children.Add(statusBarGrid);
+            Grid.SetRow(statusBarGrid, 3);
 
             // 4. Command Palette Overlay
             _commandPalette = new CommandPalette(this);
@@ -1023,6 +1044,14 @@ namespace SpanCoder.Shell
                             AddToolbarButton(extId, tb.DisplayName, tb.CommandId, tb.DisplayName);
                         }
                     }
+
+                    if (manifest.StatusBarItems != null)
+                    {
+                        foreach (var item in manifest.StatusBarItems.OrderBy(i => i.OrderPriority))
+                        {
+                            RegisterPluginStatusBarItem(extId, item);
+                        }
+                    }
                 });
             };
 
@@ -1039,6 +1068,14 @@ namespace SpanCoder.Shell
                 Dispatcher.UIThread.Post(() =>
                 {
                     UpdatePluginPanelContent(panelId, content);
+                });
+            };
+
+            _extensionManager.StatusBarItemUpdated += (extId, itemId, text, tooltip, commandId) =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    UpdatePluginStatusBarItem(extId, itemId, text, tooltip, commandId);
                 });
             };
         }
@@ -1132,8 +1169,18 @@ namespace SpanCoder.Shell
                     {
                         _toolbarPanel.Children.Remove(button);
                     }
+                    else if (control is Border border && _statusBarExtensionPanel.Children.Contains(border))
+                    {
+                        _statusBarExtensionPanel.Children.Remove(border);
+                    }
                 }
                 _extensionUiElements.Remove(extensionId);
+            }
+
+            var keysToRemove = _extensionStatusBarItems.Where(kv => controls != null && controls.Contains(kv.Value)).Select(kv => kv.Key).ToList();
+            foreach (var key in keysToRemove)
+            {
+                _extensionStatusBarItems.Remove(key);
             }
 
             // 2. Remove KeyBindings
@@ -1242,6 +1289,94 @@ namespace SpanCoder.Shell
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[ShellWindow] Failed to parse shortcut '{shortcut}' for command '{commandId}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        private void RegisterPluginStatusBarItem(string extensionId, StatusBarItemDescriptor item)
+        {
+            if (_extensionStatusBarItems.TryGetValue(item.Id, out var existing))
+            {
+                _statusBarExtensionPanel.Children.Remove(existing);
+                _extensionStatusBarItems.Remove(item.Id);
+            }
+
+            var textBlock = new TextBlock
+            {
+                Text = item.Text,
+                Foreground = Brushes.LightGray,
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 0)
+            };
+
+            var border = new Border
+            {
+                Background = Brushes.Transparent,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(6, 2),
+                Child = textBlock,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            if (!string.IsNullOrEmpty(item.Tooltip))
+            {
+                ToolTip.SetTip(border, item.Tooltip);
+            }
+
+            if (!string.IsNullOrEmpty(item.CommandId))
+            {
+                border.Tag = item.CommandId;
+                border.Cursor = new Cursor(StandardCursorType.Hand);
+                border.PointerEntered += (s, e) => border.Background = new SolidColorBrush(Color.Parse("#3E3E40"));
+                border.PointerExited += (s, e) => border.Background = Brushes.Transparent;
+                border.PointerPressed += (s, e) =>
+                {
+                    if (border.Tag is string cmdId && !string.IsNullOrEmpty(cmdId))
+                    {
+                        OnCommandInvoked(cmdId);
+                    }
+                };
+            }
+
+            _extensionStatusBarItems[item.Id] = border;
+            _statusBarExtensionPanel.Children.Add(border);
+
+            TrackExtensionUiElement(extensionId, border);
+        }
+
+        private void UpdatePluginStatusBarItem(string extensionId, string itemId, string text, string tooltip, string commandId)
+        {
+            if (_extensionStatusBarItems.TryGetValue(itemId, out var border))
+            {
+                if (border.Child is TextBlock textBlock)
+                {
+                    textBlock.Text = text;
+                }
+
+                if (!string.IsNullOrEmpty(tooltip))
+                {
+                    ToolTip.SetTip(border, tooltip);
+                }
+
+                if (!string.IsNullOrEmpty(commandId))
+                {
+                    border.Tag = commandId;
+                    border.Cursor = new Cursor(StandardCursorType.Hand);
+                    if (border.Background == null || border.Background == Brushes.Transparent)
+                    {
+                        border.PointerEntered += (s, e) => border.Background = new SolidColorBrush(Color.Parse("#3E3E40"));
+                        border.PointerExited += (s, e) => border.Background = Brushes.Transparent;
+                        border.PointerPressed += (s, e) =>
+                        {
+                            if (border.Tag is string cmdId && !string.IsNullOrEmpty(cmdId))
+                            {
+                                OnCommandInvoked(cmdId);
+                            }
+                        };
                     }
                 }
             }
@@ -3562,6 +3697,9 @@ namespace SpanCoder.Shell
             if (_extensionManager == null) return;
             int port = _extensionManager.Port;
 
+            string token = Guid.NewGuid().ToString("N");
+            _extensionManager.AddPendingToken(token, extId);
+
             var cts = new System.Threading.CancellationTokenSource();
             var client = new System.Net.Sockets.TcpClient();
 
@@ -3574,8 +3712,8 @@ namespace SpanCoder.Shell
 
                     // 1. Send RegisterExtension message
                     byte[] jsonBytes = System.Text.Encoding.UTF8.GetBytes(manifestJson);
-                    byte[] registerBuf = new byte[BinaryMessageSerializer.HeaderSize + 4 + jsonBytes.Length];
-                    int len = BinaryMessageSerializer.WriteRegisterExtension(registerBuf, jsonBytes);
+                    byte[] registerBuf = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
+                    int len = BinaryMessageSerializer.WriteRegisterExtension(registerBuf, token, jsonBytes);
                     await stream.WriteAsync(registerBuf.AsMemory(0, len), cts.Token);
                     await stream.FlushAsync(cts.Token);
 

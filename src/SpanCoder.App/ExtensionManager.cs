@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using SpanCoder.Contracts;
+using SpanCoder.Shell;
 
 namespace SpanCoder.App
 {
@@ -17,19 +18,27 @@ namespace SpanCoder.App
     {
         private TcpListener? _listener;
         private readonly ConcurrentDictionary<string, (TcpClient Client, NetworkStream Stream, object WriteLock)> _activeExtensions = new();
+        private readonly ConcurrentDictionary<string, string> _pendingTokens = new();
         private readonly List<Process> _extensionProcesses = new();
         private readonly CancellationTokenSource _cts = new();
         private readonly string _pluginsDirectory;
+
+        public void AddPendingToken(string token, string extensionId)
+        {
+            _pendingTokens[token] = extensionId;
+        }
 
         public int Port { get; private set; }
 
         public event Action<string, ExtensionManifest>? ExtensionRegistered;
         public event Action<string, string>? PanelContentUpdated;
         public event Action<string>? ExtensionUnregistered;
+        public event Action<string, string, string, string, string>? StatusBarItemUpdated;
 
         public ExtensionManager(string pluginsDirectory)
         {
             _pluginsDirectory = pluginsDirectory;
+            SettingsManager.SettingChanged += OnSettingChanged;
         }
 
         public void Start()
@@ -64,13 +73,14 @@ namespace SpanCoder.App
                         string json = File.ReadAllText(manifestPath);
                         using var doc = JsonDocument.Parse(json);
                         var root = doc.RootElement;
+                        string extensionId = root.GetProperty("id").GetString() ?? "";
                         if (root.TryGetProperty("entryPoint", out var entryPointEl))
                         {
                             string entryPoint = entryPointEl.GetString() ?? "";
                             string fullPath = Path.Combine(dir, entryPoint);
                             if (File.Exists(fullPath))
                             {
-                                LaunchPlugin(fullPath, port);
+                                LaunchPlugin(extensionId, fullPath, port);
                             }
                         }
                     }
@@ -82,8 +92,11 @@ namespace SpanCoder.App
             }
         }
 
-        private void LaunchPlugin(string path, int port)
+        private void LaunchPlugin(string extensionId, string path, int port)
         {
+            string token = Guid.NewGuid().ToString("N");
+            _pendingTokens[token] = extensionId;
+
             string executable = path;
             string arguments = $"--port {port}";
 
@@ -101,6 +114,7 @@ namespace SpanCoder.App
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            psi.EnvironmentVariables["SPANCODER_EXT_TOKEN"] = token;
 
             var proc = Process.Start(psi);
             if (proc != null)
@@ -122,13 +136,14 @@ namespace SpanCoder.App
                     string json = File.ReadAllText(manifestPath);
                     using var doc = JsonDocument.Parse(json);
                     var root = doc.RootElement;
+                    string extensionId = root.GetProperty("id").GetString() ?? "";
                     if (root.TryGetProperty("entryPoint", out var entryPointEl))
                     {
                         string entryPoint = entryPointEl.GetString() ?? "";
                         string fullPath = Path.Combine(pluginDir, entryPoint);
                         if (File.Exists(fullPath))
                         {
-                            LaunchPlugin(fullPath, Port);
+                            LaunchPlugin(extensionId, fullPath, Port);
                         }
                     }
                 }
@@ -205,41 +220,77 @@ namespace SpanCoder.App
 
             try
             {
+                // Enforce a 2-second timeout for initial authentication/registration handshake
+                using var ctsTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, ctsTimeout.Token);
+
                 byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
+                
+                // 1. Read first message (MUST be RegisterExtension)
+                int readBytes = await ReadExactlyAsync(stream, headerBuffer, 0, headerBuffer.Length, linkedCts.Token);
+                if (readBytes <= 0) return;
+
+                if (!BinaryMessageSerializer.TryParseHeader(headerBuffer, out var header) || header.Type != MessageTypes.RegisterExtension)
+                {
+                    Console.WriteLine("[ExtensionManager] Client connection rejected: First message was not RegisterExtension.");
+                    return;
+                }
+
+                byte[] payload = new byte[header.Length];
+                Array.Copy(headerBuffer, 0, payload, 0, headerBuffer.Length);
+                if (header.Length > headerBuffer.Length)
+                {
+                    await ReadExactlyAsync(stream, payload, headerBuffer.Length, header.Length - headerBuffer.Length, linkedCts.Token);
+                }
+
+                var jsonSpan = BinaryMessageSerializer.ParseRegisterExtension(payload, out string token);
+                string json = Encoding.UTF8.GetString(jsonSpan);
+                var manifest = ParseManifest(json);
+
+                // Verify token presence and association
+                if (string.IsNullOrEmpty(token) || !_pendingTokens.TryRemove(token, out var expectedId) || expectedId != manifest.Id)
+                {
+                    Console.WriteLine($"[ExtensionManager] Client connection rejected: Invalid or unauthorized token '{token}' for extension '{manifest.Id}'.");
+                    return;
+                }
+
+                registeredExtensionId = manifest.Id;
+                _activeExtensions[manifest.Id] = (client, stream, new object());
+
+                Console.WriteLine($"[ExtensionManager] Extension '{manifest.Id}' authenticated and registered successfully.");
+                ExtensionRegistered?.Invoke(manifest.Id, manifest);
+
+                // 2. Enter standard message loop (no handshake timeout, only host shutdown cancellation)
                 while (!_cts.Token.IsCancellationRequested && client.Connected)
                 {
-                    // Read header
-                    int readBytes = await ReadExactlyAsync(stream, headerBuffer, 0, headerBuffer.Length, _cts.Token);
+                    readBytes = await ReadExactlyAsync(stream, headerBuffer, 0, headerBuffer.Length, _cts.Token);
                     if (readBytes <= 0) break;
 
-                    if (!BinaryMessageSerializer.TryParseHeader(headerBuffer, out var header))
+                    if (!BinaryMessageSerializer.TryParseHeader(headerBuffer, out header))
                     {
                         throw new InvalidDataException("Invalid binary header from extension");
                     }
 
-                    byte[] payload = new byte[header.Length];
+                    payload = new byte[header.Length];
                     Array.Copy(headerBuffer, 0, payload, 0, headerBuffer.Length);
                     if (header.Length > headerBuffer.Length)
                     {
                         await ReadExactlyAsync(stream, payload, headerBuffer.Length, header.Length - headerBuffer.Length, _cts.Token);
                     }
 
-                    if (header.Type == MessageTypes.RegisterExtension)
-                    {
-                        var jsonSpan = BinaryMessageSerializer.ParseRegisterExtension(payload);
-                        string json = Encoding.UTF8.GetString(jsonSpan);
-                        var manifest = ParseManifest(json);
-
-                        registeredExtensionId = manifest.Id;
-                        _activeExtensions[manifest.Id] = (client, stream, new object());
-
-                        Console.WriteLine($"[ExtensionManager] Extension '{manifest.Id}' registered successfully.");
-                        ExtensionRegistered?.Invoke(manifest.Id, manifest);
-                    }
-                    else if (header.Type == MessageTypes.UpdateExtensionPanel)
+                    if (header.Type == MessageTypes.UpdateExtensionPanel)
                     {
                         BinaryMessageSerializer.ParseUpdateExtensionPanel(payload, out string panelId, out string content);
                         PanelContentUpdated?.Invoke(panelId, content);
+                    }
+                    else if (header.Type == MessageTypes.UpdateExtensionStatusBarItem)
+                    {
+                        BinaryMessageSerializer.ParseUpdateExtensionStatusBarItem(payload, out string itemId, out string text, out string tooltip, out string commandId);
+                        StatusBarItemUpdated?.Invoke(registeredExtensionId ?? "", itemId, text, tooltip, commandId);
+                    }
+                    else if (header.Type == MessageTypes.RegisterExtension)
+                    {
+                        throw new InvalidDataException("Extension already registered");
                     }
                 }
             }
@@ -410,11 +461,63 @@ namespace SpanCoder.App
                 }
             }
 
-            return new ExtensionManifest(id, commands, menuItems, panels, languages, toolbarItems, settings);
+            var statusBarItems = new List<StatusBarItemDescriptor>();
+            if (root.TryGetProperty("statusBarItems", out var sbEl))
+            {
+                foreach (var el in sbEl.EnumerateArray())
+                {
+                    string sbId = el.GetProperty("id").GetString() ?? "";
+                    string text = el.GetProperty("text").GetString() ?? "";
+                    string? tooltip = el.TryGetProperty("tooltip", out var ttProp) ? ttProp.GetString() : null;
+                    string? commandId = el.TryGetProperty("commandId", out var cmdProp) ? cmdProp.GetString() : null;
+                    int alignment = el.TryGetProperty("alignment", out var alignProp) ? alignProp.GetInt32() : 1; // 1 = Right default
+                    int order = el.TryGetProperty("orderPriority", out var orderProp) ? orderProp.GetInt32() : 100;
+                    statusBarItems.Add(new StatusBarItemDescriptor(sbId, text, tooltip, commandId, alignment, order));
+                }
+            }
+
+            return new ExtensionManifest(id, commands, menuItems, panels, languages, toolbarItems, settings, statusBarItems);
+        }
+
+        private void OnSettingChanged(string settingId)
+        {
+            foreach (var extId in _activeExtensions.Keys)
+            {
+                if (settingId.StartsWith(extId + ".", StringComparison.OrdinalIgnoreCase))
+                {
+                    string value = SettingsManager.Get(settingId);
+                    SendSettingChanged(extId, settingId, value);
+                }
+            }
+        }
+
+        private void SendSettingChanged(string extensionId, string settingId, string value)
+        {
+            if (_activeExtensions.TryGetValue(extensionId, out var ext))
+            {
+                byte[] temp = new byte[BinaryMessageSerializer.HeaderSize + 8 + (settingId.Length + value.Length) * sizeof(char)];
+                int len = BinaryMessageSerializer.WriteExtensionSettingChanged(temp, settingId, value);
+                byte[] payload = new byte[len];
+                Array.Copy(temp, 0, payload, 0, len);
+
+                lock (ext.WriteLock)
+                {
+                    try
+                    {
+                        ext.Stream.Write(payload, 0, len);
+                        ext.Stream.Flush();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ExtensionManager] Failed to send setting changed notification to '{extensionId}': {ex.Message}");
+                    }
+                }
+            }
         }
 
         public void Dispose()
         {
+            SettingsManager.SettingChanged -= OnSettingChanged;
             _cts.Cancel();
             _listener?.Stop();
 

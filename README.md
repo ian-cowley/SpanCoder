@@ -59,6 +59,7 @@ graph TD
 ### 4. Out-of-Process Extension Host
 * **Extension Isolation** (`ExtensionManager.cs`): Third-party extensions run as separate processes, connecting to the App's plugin socket. Extensions register commands, keybindings, and panel descriptors using a standardized JSON manifest.
 * **Resilient Commands**: Commands are executed asynchronously over the socket. If a plugin halts or enters an infinite loop, the primary IDE window remains fully active and responsive.
+* **Secure IPC Handshake**: Protects the local loopback socket boundary by enforcing a cryptographically secure token verification handshake. Connections are dropped immediately if verification fails or times out within 2 seconds.
 
 ### 5. Compile-Time Command Routing
 * **Zero-Reflection Dispatch** (`CommandGenerator.cs`): A custom incremental Source Generator processes any method or class annotated with `[Command]` or `[MenuItem]`. During compilation, it generates static dispatch branches mapping Command IDs to their execution pointers. This eliminates runtime reflection overhead, ensuring Native AOT trimmer safety and sub-millisecond IDE startup times.

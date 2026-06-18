@@ -88,5 +88,22 @@
       "displayName": "Cargo Build",
       "orderPriority": 210
     }
+  ],
+  "settings": [
+    {
+      "id": "languages-extension.enableFormatting",
+      "displayName": "Enable Languages Formatting",
+      "type": "boolean",
+      "defaultValue": "true"
+    }
+  ],
+  "statusBarItems": [
+    {
+      "id": "languages-status",
+      "text": "Py/Cargo: Idle",
+      "tooltip": "Languages extension is ready",
+      "alignment": 1,
+      "orderPriority": 200
+    }
   ]
 }

@@ -85,9 +85,12 @@ namespace SpanCoder.Tests
                     "}]" +
                 "}";
 
+                string token = "test-token-1";
+                manager.AddPendingToken(token, "test-plugin");
+
                 byte[] jsonBytes = Encoding.UTF8.GetBytes(manifestJson);
-                byte[] regBuffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + jsonBytes.Length];
-                int regLen = BinaryMessageSerializer.WriteRegisterExtension(regBuffer, jsonBytes);
+                byte[] regBuffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
+                int regLen = BinaryMessageSerializer.WriteRegisterExtension(regBuffer, token, jsonBytes);
 
                 // Send registration message
                 await stream.WriteAsync(regBuffer, 0, regLen);
@@ -213,10 +216,13 @@ namespace SpanCoder.Tests
                     await client.ConnectAsync("127.0.0.1", port);
                     using var stream = client.GetStream();
 
+                    string token = "test-token-2";
+                    manager.AddPendingToken(token, "test-plugin-unreg");
+
                     string manifestJson = "{\"id\":\"test-plugin-unreg\"}";
                     byte[] jsonBytes = Encoding.UTF8.GetBytes(manifestJson);
-                    byte[] regBuffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + jsonBytes.Length];
-                    int regLen = BinaryMessageSerializer.WriteRegisterExtension(regBuffer, jsonBytes);
+                    byte[] regBuffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
+                    int regLen = BinaryMessageSerializer.WriteRegisterExtension(regBuffer, token, jsonBytes);
 
                     await stream.WriteAsync(regBuffer, 0, regLen);
                     await stream.FlushAsync();
@@ -341,6 +347,178 @@ namespace SpanCoder.Tests
             // Getting it should now fallback to defaultValue or be unregistered (not in descriptors)
             var descriptors = SettingsManager.GetDescriptors();
             Assert.DoesNotContain(descriptors, d => d.Id == "test-ext.customSetting");
+        }
+
+        [Fact]
+        public async Task TestExtensionStatusBarAndSettingsSync()
+        {
+            // Create a temporary plugins directory
+            string tempPluginsDir = Path.Combine(Path.GetTempPath(), "SpanCoderTests_Plugins_StatusBar_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempPluginsDir);
+
+            try
+            {
+                using var manager = new ExtensionManager(tempPluginsDir);
+                
+                bool registered = false;
+                manager.ExtensionRegistered += (extId, manifest) => { registered = true; };
+
+                string? updatedItemId = null;
+                string? updatedText = null;
+                string? updatedTooltip = null;
+                string? updatedCommandId = null;
+
+                manager.StatusBarItemUpdated += (extId, itemId, text, tooltip, commandId) =>
+                {
+                    updatedItemId = itemId;
+                    updatedText = text;
+                    updatedTooltip = tooltip;
+                    updatedCommandId = commandId;
+                };
+
+                manager.Start();
+                int port = manager.Port;
+
+                using var client = new TcpClient();
+                await client.ConnectAsync("127.0.0.1", port);
+                using var stream = client.GetStream();
+
+                string token = "test-token-3";
+                manager.AddPendingToken(token, "test-plugin-status");
+
+                // Register extension
+                string manifestJson = "{" +
+                    "\"id\":\"test-plugin-status\"," +
+                    "\"settings\":[{" +
+                        "\"id\":\"test-plugin-status.mySetting\"," +
+                        "\"displayName\":\"My Setting\"," +
+                        "\"type\":\"string\"," +
+                        "\"defaultValue\":\"defaultVal\"" +
+                    "}]" +
+                "}";
+
+                byte[] jsonBytes = Encoding.UTF8.GetBytes(manifestJson);
+                byte[] regBuffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
+                int regLen = BinaryMessageSerializer.WriteRegisterExtension(regBuffer, token, jsonBytes);
+
+                await stream.WriteAsync(regBuffer, 0, regLen);
+                await stream.FlushAsync();
+
+                // Wait for registration
+                int retries = 0;
+                while (!registered && retries++ < 50)
+                {
+                    await Task.Delay(100);
+                }
+                Assert.True(registered);
+
+                // 1. Verify status bar item updates over TCP
+                byte[] statusBuffer = new byte[1024];
+                int statusLen = BinaryMessageSerializer.WriteUpdateExtensionStatusBarItem(
+                    statusBuffer, "languages-status", "Py: Running...", "Running python", "languages.runPython");
+                
+                await stream.WriteAsync(statusBuffer, 0, statusLen);
+                await stream.FlushAsync();
+
+                // Wait for status bar event
+                retries = 0;
+                while (updatedItemId == null && retries++ < 50)
+                {
+                    await Task.Delay(100);
+                }
+
+                Assert.Equal("languages-status", updatedItemId);
+                Assert.Equal("Py: Running...", updatedText);
+                Assert.Equal("Running python", updatedTooltip);
+                Assert.Equal("languages.runPython", updatedCommandId);
+
+                // 2. Verify settings sync: Host setting change -> TCP message sent to extension
+                // Start a task to read from TCP stream
+                var settingsTask = Task.Run(async () =>
+                {
+                    byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
+                    int r = await ReadExactlyAsync(stream, headerBuffer, 0, headerBuffer.Length);
+                    if (r < headerBuffer.Length) return null;
+                    if (!BinaryMessageSerializer.TryParseHeader(headerBuffer, out var header)) return null;
+                    if (header.Type != MessageTypes.ExtensionSettingChanged) return null;
+
+                    byte[] payload = new byte[header.Length];
+                    Array.Copy(headerBuffer, 0, payload, 0, headerBuffer.Length);
+                    if (header.Length > headerBuffer.Length)
+                    {
+                        await ReadExactlyAsync(stream, payload, headerBuffer.Length, header.Length - headerBuffer.Length);
+                    }
+                    return payload;
+                });
+
+                // Change settings
+                SettingsManager.Set("test-plugin-status.mySetting", "newValue");
+
+                var payload = await settingsTask;
+                Assert.NotNull(payload);
+
+                BinaryMessageSerializer.ParseExtensionSettingChanged(payload, out string settingId, out string val);
+                Assert.Equal("test-plugin-status.mySetting", settingId);
+                Assert.Equal("newValue", val);
+            }
+            finally
+            {
+                SettingsManager.UnregisterExtensionSettings("test-plugin-status");
+                if (Directory.Exists(tempPluginsDir))
+                {
+                    Directory.Delete(tempPluginsDir, true);
+                }
+            }
+        }
+
+        [Fact]
+        public async Task TestExtensionConnectionRejectedWithoutValidToken()
+        {
+            string tempPluginsDir = Path.Combine(Path.GetTempPath(), "SpanCoderTests_Plugins_Rejected_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempPluginsDir);
+
+            try
+            {
+                using var manager = new ExtensionManager(tempPluginsDir);
+                
+                bool registered = false;
+                manager.ExtensionRegistered += (extId, manifest) => { registered = true; };
+
+                manager.Start();
+                int port = manager.Port;
+
+                using var client = new TcpClient();
+                await client.ConnectAsync("127.0.0.1", port);
+                using var stream = client.GetStream();
+
+                // Connect and send a register message with an invalid token
+                string invalidToken = "wrong-token";
+                // We do NOT add it to pending tokens on the host manager!
+
+                string manifestJson = "{\"id\":\"test-plugin-rejected\"}";
+                byte[] jsonBytes = Encoding.UTF8.GetBytes(manifestJson);
+                byte[] regBuffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + invalidToken.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
+                int regLen = BinaryMessageSerializer.WriteRegisterExtension(regBuffer, invalidToken, jsonBytes);
+
+                await stream.WriteAsync(regBuffer, 0, regLen);
+                await stream.FlushAsync();
+
+                // Wait to see if registration is ignored
+                await Task.Delay(500);
+                Assert.False(registered, "Extension should not register with an invalid token");
+
+                // Check that connection was closed by host
+                byte[] temp = new byte[10];
+                int read = await stream.ReadAsync(temp, 0, temp.Length);
+                Assert.Equal(0, read); // Socket should be closed/EOF
+            }
+            finally
+            {
+                if (Directory.Exists(tempPluginsDir))
+                {
+                    Directory.Delete(tempPluginsDir, true);
+                }
+            }
         }
     }
 }

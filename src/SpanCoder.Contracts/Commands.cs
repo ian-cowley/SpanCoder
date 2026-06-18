@@ -69,13 +69,53 @@ namespace SpanCoder.Contracts
         }
     }
 
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
+    public sealed class SettingAttribute : Attribute
+    {
+        public string Id { get; }
+        public string DisplayName { get; }
+        public string Type { get; }
+        public string DefaultValue { get; }
+
+        public SettingAttribute(string id, string displayName, string type = "string", string defaultValue = "")
+        {
+            Id = id;
+            DisplayName = displayName;
+            Type = type;
+            DefaultValue = defaultValue;
+        }
+    }
+
+    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
+    public sealed class StatusBarItemAttribute : Attribute
+    {
+        public string Id { get; }
+        public string Text { get; }
+        public string Tooltip { get; }
+        public string CommandId { get; }
+        public int Alignment { get; } // 0 = Left, 1 = Right
+        public int OrderPriority { get; }
+
+        public StatusBarItemAttribute(string id, string text, string tooltip = "", string commandId = "", int alignment = 1, int orderPriority = 100)
+        {
+            Id = id;
+            Text = text;
+            Tooltip = tooltip;
+            CommandId = commandId;
+            Alignment = alignment;
+            OrderPriority = orderPriority;
+        }
+    }
+
     public interface IExtensionManager
     {
         int Port { get; }
         event Action<string, ExtensionManifest> ExtensionRegistered;
         event Action<string, string> PanelContentUpdated;
         event Action<string> ExtensionUnregistered;
+        event Action<string, string, string, string, string>? StatusBarItemUpdated;
         void ExecuteCommand(string extensionId, string commandId);
+        void AddPendingToken(string token, string extensionId);
     }
 
     public readonly record struct LanguageConfigDescriptor(
@@ -101,6 +141,15 @@ namespace SpanCoder.Contracts
         string DefaultValue
     );
 
+    public readonly record struct StatusBarItemDescriptor(
+        string Id,
+        string Text,
+        string? Tooltip,
+        string? CommandId,
+        int Alignment, // 0 = Left, 1 = Right
+        int OrderPriority
+    );
+
     public struct ExtensionManifest
     {
         public string Id { get; }
@@ -110,9 +159,10 @@ namespace SpanCoder.Contracts
         public System.Collections.Generic.List<LanguageConfigDescriptor> Languages { get; }
         public System.Collections.Generic.List<ToolbarItemDescriptor> ToolbarItems { get; }
         public System.Collections.Generic.List<SettingDescriptor> Settings { get; }
+        public System.Collections.Generic.List<StatusBarItemDescriptor> StatusBarItems { get; }
 
         public ExtensionManifest(string id, System.Collections.Generic.List<CommandDescriptor> commands, System.Collections.Generic.List<MenuItemDescriptor> menuItems, System.Collections.Generic.List<PanelDescriptor> panels)
-            : this(id, commands, menuItems, panels, new(), new(), new())
+            : this(id, commands, menuItems, panels, new(), new(), new(), new())
         {
         }
 
@@ -123,7 +173,8 @@ namespace SpanCoder.Contracts
             System.Collections.Generic.List<PanelDescriptor> panels,
             System.Collections.Generic.List<LanguageConfigDescriptor> languages,
             System.Collections.Generic.List<ToolbarItemDescriptor> toolbarItems,
-            System.Collections.Generic.List<SettingDescriptor> settings)
+            System.Collections.Generic.List<SettingDescriptor> settings,
+            System.Collections.Generic.List<StatusBarItemDescriptor> statusBarItems)
         {
             Id = id;
             Commands = commands;
@@ -132,6 +183,7 @@ namespace SpanCoder.Contracts
             Languages = languages;
             ToolbarItems = toolbarItems;
             Settings = settings;
+            StatusBarItems = statusBarItems;
         }
     }
 

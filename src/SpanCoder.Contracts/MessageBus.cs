@@ -45,6 +45,8 @@ namespace SpanCoder.Contracts
         public const byte BatchEditResponse = 38;
         public const byte SaveFile = 39;
         public const byte SaveFileResponse = 40;
+        public const byte UpdateExtensionStatusBarItem = 41;
+        public const byte ExtensionSettingChanged = 42;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -542,23 +544,54 @@ namespace SpanCoder.Contracts
             return "";
         }
 
-        public static int WriteRegisterExtension(Span<byte> buffer, ReadOnlySpan<byte> manifestJsonBytes)
+        public static int WriteRegisterExtension(Span<byte> buffer, ReadOnlySpan<char> token, ReadOnlySpan<byte> manifestJsonBytes)
         {
-            int totalLength = HeaderSize + sizeof(int) + manifestJsonBytes.Length;
+            int tokenBytesCount = token.Length * sizeof(char);
+            int totalLength = HeaderSize + sizeof(int) + tokenBytesCount + sizeof(int) + manifestJsonBytes.Length;
             if (buffer.Length < totalLength)
                 throw new ArgumentException("Buffer too small", nameof(buffer));
 
             WriteHeader(buffer, MessageTypes.RegisterExtension, totalLength, 0, 0);
+            int writeOffset = HeaderSize;
+
+            int tokenLen = token.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in tokenLen);
+            writeOffset += sizeof(int);
+
+            if (tokenLen > 0)
+            {
+                ReadOnlySpan<byte> tokenBytes = MemoryMarshal.AsBytes(token);
+                tokenBytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += tokenBytesCount;
+            }
+
             int jsonLen = manifestJsonBytes.Length;
-            MemoryMarshal.Write(buffer.Slice(HeaderSize, sizeof(int)), in jsonLen);
-            manifestJsonBytes.CopyTo(buffer.Slice(HeaderSize + sizeof(int)));
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in jsonLen);
+            writeOffset += sizeof(int);
+
+            manifestJsonBytes.CopyTo(buffer.Slice(writeOffset));
             return totalLength;
         }
 
-        public static ReadOnlySpan<byte> ParseRegisterExtension(ReadOnlySpan<byte> messageBuffer)
+        public static ReadOnlySpan<byte> ParseRegisterExtension(ReadOnlySpan<byte> messageBuffer, out string token)
         {
-            int jsonLen = MemoryMarshal.Read<int>(messageBuffer.Slice(HeaderSize, sizeof(int)));
-            return messageBuffer.Slice(HeaderSize + sizeof(int), jsonLen);
+            int readOffset = HeaderSize;
+
+            int tokenLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+
+            token = "";
+            if (tokenLen > 0)
+            {
+                ReadOnlySpan<byte> tokenBytes = messageBuffer.Slice(readOffset, tokenLen * sizeof(char));
+                token = new string(MemoryMarshal.Cast<byte, char>(tokenBytes));
+                readOffset += tokenLen * sizeof(char);
+            }
+
+            int jsonLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+
+            return messageBuffer.Slice(readOffset, jsonLen);
         }
 
         public static int WriteExecuteExtensionCommand(Span<byte> buffer, ReadOnlySpan<char> commandId)
@@ -1542,6 +1575,168 @@ namespace SpanCoder.Contracts
 
             WriteHeader(buffer, MessageTypes.SaveFileResponse, totalLength, documentId, 0);
             return totalLength;
+        }
+
+        public static int WriteUpdateExtensionStatusBarItem(Span<byte> buffer, ReadOnlySpan<char> itemId, ReadOnlySpan<char> text, ReadOnlySpan<char> tooltip, ReadOnlySpan<char> commandId)
+        {
+            int itemIdBytesCount = itemId.Length * sizeof(char);
+            int textBytesCount = text.Length * sizeof(char);
+            int tooltipBytesCount = tooltip.Length * sizeof(char);
+            int commandIdBytesCount = commandId.Length * sizeof(char);
+
+            int totalLength = HeaderSize + sizeof(int) + itemIdBytesCount + sizeof(int) + textBytesCount + sizeof(int) + tooltipBytesCount + sizeof(int) + commandIdBytesCount;
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.UpdateExtensionStatusBarItem, totalLength, 0, 0);
+            int writeOffset = HeaderSize;
+
+            int itemIdLen = itemId.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in itemIdLen);
+            writeOffset += sizeof(int);
+            if (itemIdLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(itemId);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += itemIdBytesCount;
+            }
+
+            int textLen = text.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in textLen);
+            writeOffset += sizeof(int);
+            if (textLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(text);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += textBytesCount;
+            }
+
+            int tooltipLen = tooltip.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in tooltipLen);
+            writeOffset += sizeof(int);
+            if (tooltipLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(tooltip);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += tooltipBytesCount;
+            }
+
+            int commandIdLen = commandId.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in commandIdLen);
+            writeOffset += sizeof(int);
+            if (commandIdLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(commandId);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += commandIdBytesCount;
+            }
+
+            return totalLength;
+        }
+
+        public static void ParseUpdateExtensionStatusBarItem(ReadOnlySpan<byte> messageBuffer, out string itemId, out string text, out string tooltip, out string commandId)
+        {
+            int readOffset = HeaderSize;
+
+            int itemIdLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            itemId = "";
+            if (itemIdLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, itemIdLen * sizeof(char));
+                itemId = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += itemIdLen * sizeof(char);
+            }
+
+            int textLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            text = "";
+            if (textLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, textLen * sizeof(char));
+                text = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += textLen * sizeof(char);
+            }
+
+            int tooltipLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            tooltip = "";
+            if (tooltipLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, tooltipLen * sizeof(char));
+                tooltip = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += tooltipLen * sizeof(char);
+            }
+
+            int commandIdLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            commandId = "";
+            if (commandIdLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, commandIdLen * sizeof(char));
+                commandId = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += commandIdLen * sizeof(char);
+            }
+        }
+
+        public static int WriteExtensionSettingChanged(Span<byte> buffer, ReadOnlySpan<char> settingId, ReadOnlySpan<char> value)
+        {
+            int settingIdBytesCount = settingId.Length * sizeof(char);
+            int valueBytesCount = value.Length * sizeof(char);
+
+            int totalLength = HeaderSize + sizeof(int) + settingIdBytesCount + sizeof(int) + valueBytesCount;
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.ExtensionSettingChanged, totalLength, 0, 0);
+            int writeOffset = HeaderSize;
+
+            int settingIdLen = settingId.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in settingIdLen);
+            writeOffset += sizeof(int);
+            if (settingIdLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(settingId);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += settingIdBytesCount;
+            }
+
+            int valueLen = value.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in valueLen);
+            writeOffset += sizeof(int);
+            if (valueLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(value);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += valueBytesCount;
+            }
+
+            return totalLength;
+        }
+
+        public static void ParseExtensionSettingChanged(ReadOnlySpan<byte> messageBuffer, out string settingId, out string value)
+        {
+            int readOffset = HeaderSize;
+
+            int settingIdLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            settingId = "";
+            if (settingIdLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, settingIdLen * sizeof(char));
+                settingId = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += settingIdLen * sizeof(char);
+            }
+
+            int valueLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            value = "";
+            if (valueLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, valueLen * sizeof(char));
+                value = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += valueLen * sizeof(char);
+            }
         }
     }
 }

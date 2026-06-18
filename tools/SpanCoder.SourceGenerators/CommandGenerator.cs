@@ -212,6 +212,8 @@ namespace SpanCoder.Contracts
 
             AttributeData? pluginAttr = null;
             var panelAttrs = new List<AttributeData>();
+            var settingAttrs = new List<AttributeData>();
+            var statusBarAttrs = new List<AttributeData>();
 
             foreach (var attr in classSymbol.GetAttributes())
             {
@@ -223,6 +225,14 @@ namespace SpanCoder.Contracts
                 else if (attrName == "SpanCoder.Contracts.CustomPanelAttribute")
                 {
                     panelAttrs.Add(attr);
+                }
+                else if (attrName == "SpanCoder.Contracts.SettingAttribute")
+                {
+                    settingAttrs.Add(attr);
+                }
+                else if (attrName == "SpanCoder.Contracts.StatusBarItemAttribute")
+                {
+                    statusBarAttrs.Add(attr);
                 }
             }
 
@@ -240,7 +250,29 @@ namespace SpanCoder.Contracts
                 panels.Add(new PanelInfo(id, title));
             }
 
-            return new PluginClassInfo(pluginId, ns, className, panels);
+            var settings = new List<SettingInfo>();
+            foreach (var attr in settingAttrs)
+            {
+                string id = attr.ConstructorArguments.Length > 0 ? attr.ConstructorArguments[0].Value as string ?? "" : "";
+                string displayName = attr.ConstructorArguments.Length > 1 ? attr.ConstructorArguments[1].Value as string ?? "" : "";
+                string type = attr.ConstructorArguments.Length > 2 ? attr.ConstructorArguments[2].Value as string ?? "string" : "string";
+                string defaultValue = attr.ConstructorArguments.Length > 3 ? attr.ConstructorArguments[3].Value as string ?? "" : "";
+                settings.Add(new SettingInfo(id, displayName, type, defaultValue));
+            }
+
+            var statusBarItems = new List<StatusBarItemInfo>();
+            foreach (var attr in statusBarAttrs)
+            {
+                string id = attr.ConstructorArguments.Length > 0 ? attr.ConstructorArguments[0].Value as string ?? "" : "";
+                string text = attr.ConstructorArguments.Length > 1 ? attr.ConstructorArguments[1].Value as string ?? "" : "";
+                string tooltip = attr.ConstructorArguments.Length > 2 ? attr.ConstructorArguments[2].Value as string ?? "" : "";
+                string commandId = attr.ConstructorArguments.Length > 3 ? attr.ConstructorArguments[3].Value as string ?? "" : "";
+                int alignment = attr.ConstructorArguments.Length > 4 ? Convert.ToInt32(attr.ConstructorArguments[4].Value ?? 1) : 1;
+                int orderPriority = attr.ConstructorArguments.Length > 5 ? Convert.ToInt32(attr.ConstructorArguments[5].Value ?? 100) : 100;
+                statusBarItems.Add(new StatusBarItemInfo(id, text, tooltip, commandId, alignment, orderPriority));
+            }
+
+            return new PluginClassInfo(pluginId, ns, className, panels, settings, statusBarItems);
         }
 
         private static void GeneratePluginHost(
@@ -405,7 +437,37 @@ namespace SpanCoder.Contracts
             }
             jsonBuilder.Append("],");
             jsonBuilder.Append("\\\"languages\\\":[],");
-            jsonBuilder.Append("\\\"toolbarItems\\\":[]");
+            jsonBuilder.Append("\\\"toolbarItems\\\":[],");
+
+            jsonBuilder.Append("\\\"settings\\\":[");
+            for (int i = 0; i < plugin.Settings.Count; i++)
+            {
+                var s = plugin.Settings[i];
+                if (i > 0) jsonBuilder.Append(",");
+                jsonBuilder.Append("{");
+                jsonBuilder.Append($"\\\"id\\\":\\\"{s.Id}\\\",");
+                jsonBuilder.Append($"\\\"displayName\\\":\\\"{s.DisplayName}\\\",");
+                jsonBuilder.Append($"\\\"type\\\":\\\"{s.Type}\\\",");
+                jsonBuilder.Append($"\\\"defaultValue\\\":\\\"{s.DefaultValue}\\\"");
+                jsonBuilder.Append("}");
+            }
+            jsonBuilder.Append("],");
+
+            jsonBuilder.Append("\\\"statusBarItems\\\":[");
+            for (int i = 0; i < plugin.StatusBarItems.Count; i++)
+            {
+                var s = plugin.StatusBarItems[i];
+                if (i > 0) jsonBuilder.Append(",");
+                jsonBuilder.Append("{");
+                jsonBuilder.Append($"\\\"id\\\":\\\"{s.Id}\\\",");
+                jsonBuilder.Append($"\\\"text\\\":\\\"{s.Text}\\\",");
+                jsonBuilder.Append($"\\\"tooltip\\\":\\\"{s.Tooltip}\\\",");
+                jsonBuilder.Append($"\\\"commandId\\\":\\\"{s.CommandId}\\\",");
+                jsonBuilder.Append($"\\\"alignment\\\":{s.Alignment},");
+                jsonBuilder.Append($"\\\"orderPriority\\\":{s.OrderPriority}");
+                jsonBuilder.Append("}");
+            }
+            jsonBuilder.Append("]");
             jsonBuilder.Append("}");
 
             sb.AppendLine("            string manifestJson = \"" + jsonBuilder.ToString() + "\";");
@@ -487,13 +549,53 @@ namespace SpanCoder.Contracts
         public string Namespace { get; }
         public string ClassName { get; }
         public List<PanelInfo> Panels { get; }
+        public List<SettingInfo> Settings { get; }
+        public List<StatusBarItemInfo> StatusBarItems { get; }
 
-        public PluginClassInfo(string pluginId, string ns, string className, List<PanelInfo> panels)
+        public PluginClassInfo(string pluginId, string ns, string className, List<PanelInfo> panels, List<SettingInfo> settings, List<StatusBarItemInfo> statusBarItems)
         {
             PluginId = pluginId;
             Namespace = ns;
             ClassName = className;
             Panels = panels;
+            Settings = settings;
+            StatusBarItems = statusBarItems;
+        }
+    }
+
+    public sealed class SettingInfo
+    {
+        public string Id { get; }
+        public string DisplayName { get; }
+        public string Type { get; }
+        public string DefaultValue { get; }
+
+        public SettingInfo(string id, string displayName, string type, string defaultValue)
+        {
+            Id = id;
+            DisplayName = displayName;
+            Type = type;
+            DefaultValue = defaultValue;
+        }
+    }
+
+    public sealed class StatusBarItemInfo
+    {
+        public string Id { get; }
+        public string Text { get; }
+        public string Tooltip { get; }
+        public string CommandId { get; }
+        public int Alignment { get; }
+        public int OrderPriority { get; }
+
+        public StatusBarItemInfo(string id, string text, string tooltip, string commandId, int alignment, int orderPriority)
+        {
+            Id = id;
+            Text = text;
+            Tooltip = tooltip;
+            CommandId = commandId;
+            Alignment = alignment;
+            OrderPriority = orderPriority;
         }
     }
 

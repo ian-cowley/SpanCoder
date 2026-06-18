@@ -117,7 +117,10 @@ namespace SpanCoder.Contracts
         void ExecuteCommand(string extensionId, string commandId);
         void AddPendingToken(string token, string extensionId);
         System.Threading.Tasks.Task<string?> FormatDocumentAsync(string extensionId, int documentId, string filePath, string content);
+        void UninstallPlugin(string extensionId);
+        void InstallAndLaunchPlugin(string pluginDir);
     }
+
 
     public readonly record struct LanguageConfigDescriptor(
         string Extension,

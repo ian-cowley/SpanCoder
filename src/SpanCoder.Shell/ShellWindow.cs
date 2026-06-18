@@ -99,6 +99,8 @@ namespace SpanCoder.Shell
         private readonly Dictionary<string, List<string>> _extensionLanguageExts = new();
         private readonly Dictionary<string, (System.Net.Sockets.TcpClient Client, System.Threading.CancellationTokenSource Cts)> _mockExtensionConnections = new();
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _formattersByFileExtension = new(StringComparer.OrdinalIgnoreCase);
+        private List<MarketplaceExtension> _marketplaceExtensions = new();
+        private Action? _refreshExtensionsListAction;
 
         public ShellWindow()
         {
@@ -521,8 +523,157 @@ namespace SpanCoder.Shell
             extGrid.Children.Add(extListBox);
             Grid.SetRow(extListBox, 1);
 
-            var marketplaceExtensions = new List<MarketplaceExtension>
+            _marketplaceExtensions = new List<MarketplaceExtension>
             {
+                new MarketplaceExtension
+                {
+                    Id = "prettier-extension",
+                    Name = "Prettier Formatter",
+                    Description = "Opinionated code formatter for JS, JSON, and CSS.",
+                    IsInstalled = false,
+                    ManifestJson = @"{
+                      ""id"": ""prettier-extension"",
+                      ""displayName"": ""Prettier Formatter Extension"",
+                      ""version"": ""1.0.0"",
+                      ""entryPoint"": ""SpanCoder.Extensions.Prettier.dll"",
+                      ""formatters"": [
+                        "".js"",
+                        "".json"",
+                        "".css""
+                      ],
+                      ""commands"": [
+                        {
+                          ""id"": ""prettier.format"",
+                          ""displayName"": ""Format Document with Prettier"",
+                          ""category"": ""Format""
+                        }
+                      ],
+                      ""settings"": [
+                        {
+                          ""id"": ""prettier-extension.prettierPath"",
+                          ""displayName"": ""Prettier CLI Path"",
+                          ""type"": ""string"",
+                          ""defaultValue"": """"
+                        }
+                      ]
+                    }"
+                },
+                new MarketplaceExtension
+                {
+                    Id = "languages-extension",
+                    Name = "Core Languages Support",
+                    Description = "Syntax highlighting and tools for Python, C++, Rust, and Go.",
+                    IsInstalled = false,
+                    ManifestJson = @"{
+                      ""id"": ""languages-extension"",
+                      ""displayName"": ""Core Languages Extension Support"",
+                      ""version"": ""1.0.0"",
+                      ""entryPoint"": ""SpanCoder.Extensions.Languages.dll"",
+                      ""languages"": [
+                        {
+                          ""extension"": "".py"",
+                          ""lineComment"": ""#"",
+                          ""keywords"": [
+                            ""and"", ""as"", ""assert"", ""async"", ""await"", ""break"", ""class"", ""continue"", ""def"",
+                            ""del"", ""elif"", ""else"", ""except"", ""False"", ""finally"", ""for"", ""from"", ""global"",
+                            ""if"", ""import"", ""in"", ""is"", ""lambda"", ""None"", ""nonlocal"", ""not"", ""or"", ""pass"",
+                            ""raise"", ""return"", ""True"", ""try"", ""while"", ""with"", ""yield""
+                          ],
+                          ""types"": [
+                            ""int"", ""float"", ""complex"", ""str"", ""bytes"", ""bytearray"", ""list"", ""tuple"", ""range"",
+                            ""dict"", ""set"", ""frozenset"", ""bool"", ""memoryview"", ""object""
+                          ]
+                        },
+                        {
+                          ""extension"": "".cpp"",
+                          ""lineComment"": ""//"",
+                          ""blockCommentStart"": ""/*"",
+                          ""blockCommentEnd"": ""*/"",
+                          ""keywords"": [
+                            ""alignas"", ""alignof"", ""asm"", ""auto"", ""break"", ""case"", ""catch"", ""class"", ""concept"", ""const"", ""consteval"", ""constexpr"", ""constinit"", ""continue"", ""co_await"", ""co_return"", ""co_yield"", ""decltype"", ""default"", ""delete"", ""do"", ""else"", ""enum"", ""explicit"", ""export"", ""extern"", ""false"", ""for"", ""friend"", ""goto"", ""if"", ""inline"", ""mutable"", ""namespace"", ""new"", ""noexcept"", ""nullptr"", ""operator"", ""private"", ""protected"", ""public"", ""register"", ""reinterpret_cast"", ""requires"", ""return"", ""sizeof"", ""static"", ""static_assert"", ""static_cast"", ""struct"", ""switch"", ""template"", ""this"", ""thread_local"", ""throw"", ""true"", ""try"", ""typedef"", ""typeid"", ""typename"", ""union"", ""using"", ""virtual"", ""volatile"", ""while""
+                          ],
+                          ""types"": [
+                            ""bool"", ""char"", ""char8_t"", ""char16_t"", ""char32_t"", ""double"", ""float"", ""int"", ""long"", ""short"", ""signed"", ""unsigned"", ""void"", ""wchar_t"", ""size_t"", ""std""
+                          ]
+                        },
+                        {
+                          ""extension"": "".rs"",
+                          ""lineComment"": ""//"",
+                          ""blockCommentStart"": ""/*"",
+                          ""blockCommentEnd"": ""*/"",
+                          ""keywords"": [
+                            ""as"", ""async"", ""await"", ""break"", ""const"", ""continue"", ""crate"", ""dyn"", ""else"",
+                            ""enum"", ""extern"", ""false"", ""fn"", ""for"", ""if"", ""impl"", ""in"", ""let"", ""loop"",
+                            ""match"", ""mod"", ""move"", ""mut"", ""pub"", ""ref"", ""return"", ""self"", ""Self"", ""static"",
+                            ""struct"", ""super"", ""trait"", ""true"", ""type"", ""union"", ""unsafe"", ""use"", ""where"",
+                            ""while""
+                          ],
+                          ""types"": [
+                            ""i8"", ""i16"", ""i32"", ""i64"", ""i128"", ""isize"", ""u8"", ""u16"", ""u32"", ""u64"", ""u128"", ""usize"",
+                            ""f32"", ""f64"", ""char"", ""bool"", ""str"", ""Option"", ""Result"", ""String"", ""Vec""
+                          ]
+                        },
+                        {
+                          ""extension"": "".go"",
+                          ""lineComment"": ""//"",
+                          ""blockCommentStart"": ""/*"",
+                          ""blockCommentEnd"": ""*/"",
+                          ""keywords"": [
+                            ""break"", ""default"", ""func"", ""interface"", ""select"", ""case"", ""defer"", ""go"",
+                            ""map"", ""struct"", ""chan"", ""else"", ""goto"", ""package"", ""switch"", ""const"",
+                            ""fallthrough"", ""if"", ""range"", ""type"", ""continue"", ""for"", ""import"", ""return"",
+                            ""var""
+                          ],
+                          ""types"": [
+                            ""bool"", ""string"", ""int"", ""int8"", ""int16"", ""int32"", ""int64"", ""uint"", ""uint8"",
+                            ""uint16"", ""uint32"", ""uint64"", ""uintptr"", ""byte"", ""rune"", ""float32"", ""float64"",
+                            ""complex64"", ""complex128"", ""error""
+                          ]
+                        }
+                      ],
+                      ""commands"": [
+                        {
+                          ""id"": ""languages.runPython"",
+                          ""displayName"": ""Run Python Script"",
+                          ""category"": ""Languages""
+                        },
+                        {
+                          ""id"": ""languages.cargoBuild"",
+                          ""displayName"": ""Cargo Build"",
+                          ""category"": ""Languages""
+                        }
+                      ],
+                      ""toolbarItems"": [
+                        {
+                          ""commandId"": ""languages.runPython"",
+                          ""displayName"": ""Run Py"",
+                          ""orderPriority"": 200
+                        },
+                        {
+                          ""commandId"": ""languages.cargoBuild"",
+                          ""displayName"": ""Cargo Build"",
+                          ""orderPriority"": 210
+                        }
+                      ],
+                      ""settings"": [
+                        {
+                          ""id"": ""languages-extension.enableFormatting"",
+                          ""displayName"": ""Enable Languages Formatting"",
+                          ""type"": ""boolean"",
+                          ""defaultValue"": ""true""
+                        }
+                      ],
+                      ""statusBarItems"": [
+                        {
+                          ""id"": ""languages-status"",
+                          ""text"": ""Py/Cargo: Idle"",
+                          ""tooltip"": ""Languages extension is ready"",
+                          ""alignment"": 1,
+                          ""orderPriority"": 200
+                        }
+                      ]
+                    }"
+                },
                 new MarketplaceExtension
                 {
                     Id = "html-preview",
@@ -604,12 +755,14 @@ namespace SpanCoder.Shell
             void RefreshExtensionsList()
             {
                 string query = extSearchBox.Text ?? "";
-                var filtered = marketplaceExtensions
+                var filtered = _marketplaceExtensions
                     .Where(x => x.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                                 x.Description.Contains(query, StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 extListBox.ItemsSource = filtered;
             }
+
+            _refreshExtensionsListAction = RefreshExtensionsList;
 
             extSearchBox.KeyUp += (s, e) => RefreshExtensionsList();
 
@@ -635,14 +788,45 @@ namespace SpanCoder.Shell
                 {
                     if (item.IsInstalled)
                     {
-                        StopMockExtension(item.Id);
-                        UnregisterExtensionUI(item.Id);
+                        if (item.Id == "prettier-extension" || item.Id == "languages-extension")
+                        {
+                            if (_extensionManager != null)
+                            {
+                                _extensionManager.UninstallPlugin(item.Id);
+                            }
+                            else
+                            {
+                                UnregisterExtensionUI(item.Id);
+                            }
+                        }
+                        else
+                        {
+                            StopMockExtension(item.Id);
+                            UnregisterExtensionUI(item.Id);
+                        }
                         item.IsInstalled = false;
                     }
                     else
                     {
-                        StartMockExtension(item.Id, item.ManifestJson);
-                        item.IsInstalled = true;
+                        if (item.Id == "prettier-extension" || item.Id == "languages-extension")
+                        {
+                            var pluginsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins", item.Id);
+                            if (System.IO.Directory.Exists(pluginsDir) && _extensionManager != null)
+                            {
+                                _extensionManager.InstallAndLaunchPlugin(pluginsDir);
+                                item.IsInstalled = true;
+                            }
+                            else
+                            {
+                                StartMockExtension(item.Id, item.ManifestJson);
+                                item.IsInstalled = true;
+                            }
+                        }
+                        else
+                        {
+                            StartMockExtension(item.Id, item.ManifestJson);
+                            item.IsInstalled = true;
+                        }
                     }
                     RefreshExtensionsList();
                 };
@@ -1000,6 +1184,13 @@ namespace SpanCoder.Shell
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    var existing = _marketplaceExtensions.FirstOrDefault(x => x.Id == extId);
+                    if (existing != null)
+                    {
+                        existing.IsInstalled = true;
+                        _refreshExtensionsListAction?.Invoke();
+                    }
+
                     if (manifest.Settings != null)
                     {
                         foreach (var setting in manifest.Settings)
@@ -1067,6 +1258,13 @@ namespace SpanCoder.Shell
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    var existing = _marketplaceExtensions.FirstOrDefault(x => x.Id == extId);
+                    if (existing != null)
+                    {
+                        existing.IsInstalled = false;
+                        _refreshExtensionsListAction?.Invoke();
+                    }
+
                     UnregisterExtensionUI(extId);
                     var keysToRemove = _formattersByFileExtension.Where(kvp => kvp.Value == extId).Select(kvp => kvp.Key).ToList();
                     foreach (var key in keysToRemove)

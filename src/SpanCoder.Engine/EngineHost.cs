@@ -342,6 +342,52 @@ namespace SpanCoder.Engine
                         break;
                     }
 
+                case MessageTypes.BatchEditRequest:
+                    {
+                        var edits = BinaryMessageSerializer.ParseBatchEditRequest(message, out int docId);
+                        LogHelper.Log($"[EngineHost] ProcessMessage BatchEditRequest: docId={docId}, editsCount={edits.Length}");
+                        if (_documents.TryGetValue(docId, out var doc))
+                        {
+                            LogHelper.Log($"[EngineHost] BatchEditRequest: doc beforeLength={doc.Length}");
+                            // Sort edits in descending order of offset so they do not shift each other's offsets
+                            var sortedEdits = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.OrderByDescending(edits, e => e.Offset));
+                            foreach (var edit in sortedEdits)
+                            {
+                                LogHelper.Log($"[EngineHost] BatchEditRequest applying edit: offset={edit.Offset}, deleteLen={edit.DeleteLength}, text='{edit.Text}'");
+                                if (edit.DeleteLength > 0)
+                                {
+                                    doc.Delete(edit.Offset, edit.DeleteLength);
+                                }
+                                if (!string.IsNullOrEmpty(edit.Text))
+                                {
+                                    doc.Insert(edit.Offset, edit.Text);
+                                }
+                            }
+
+                            // Echo back change
+                            int textEditsBytes = 0;
+                            foreach (var edit in edits)
+                            {
+                                textEditsBytes += sizeof(int) * 3;
+                                if (edit.Text != null)
+                                {
+                                    textEditsBytes += edit.Text.Length * sizeof(char);
+                                }
+                            }
+                            int responseLen = BinaryMessageSerializer.HeaderSize + sizeof(int) + textEditsBytes;
+                            byte[] responseBuffer = new byte[responseLen];
+                            BinaryMessageSerializer.WriteBatchEditResponse(responseBuffer, docId, edits);
+                            LogHelper.Log($"[EngineHost] BatchEditRequest: sending BatchEditResponse ({responseBuffer.Length} bytes), doc afterLength={doc.Length}");
+                            MessageReceived?.Invoke(responseBuffer);
+
+                            // Notify LSP Client
+                            char[] fullBuf = new char[doc.Length];
+                            doc.PieceTable.GetText(0, doc.Length, fullBuf);
+                            GetOrCreateLspClient(doc.FilePath).NotifyDidChange(doc.FilePath, new string(fullBuf));
+                        }
+                        break;
+                    }
+
                 case MessageTypes.AutocompleteRequest:
                     {
                         int docId = header.DocumentId;
@@ -593,6 +639,25 @@ namespace SpanCoder.Engine
                                 
                                 byte[] buffer = new byte[respLen + 64];
                                 int len = BinaryMessageSerializer.WriteDocumentSymbolsResponse(buffer, docId, items);
+                                byte[] finalBuffer = new byte[len];
+                                Array.Copy(buffer, 0, finalBuffer, 0, len);
+                                MessageReceived?.Invoke(finalBuffer);
+                            });
+                        }
+                        break;
+                    }
+
+                case MessageTypes.FoldingRangeRequest:
+                    {
+                        int docId = header.DocumentId;
+                        if (_documents.TryGetValue(docId, out var doc))
+                        {
+                            Task.Run(async () =>
+                            {
+                                var items = await GetOrCreateLspClient(doc.FilePath).RequestFoldingRangesAsync(doc.FilePath);
+                                int respLen = BinaryMessageSerializer.HeaderSize + sizeof(int) + items.Length * sizeof(int) * 2;
+                                byte[] buffer = new byte[respLen + 64];
+                                int len = BinaryMessageSerializer.WriteFoldingRangeResponse(buffer, docId, items);
                                 byte[] finalBuffer = new byte[len];
                                 Array.Copy(buffer, 0, finalBuffer, 0, len);
                                 MessageReceived?.Invoke(finalBuffer);

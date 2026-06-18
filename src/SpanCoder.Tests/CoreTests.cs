@@ -458,5 +458,94 @@ namespace SpanCoder.Tests
                     File.Delete(tempFile);
             }
         }
+
+        [Fact]
+        public void TestIpcEngineConnectionBatchEdit()
+        {
+            using var connection = new SpanCoder.App.IpcEngineConnection();
+            connection.Start();
+
+            bool receivedLoadResponse = false;
+            int finalDocId = -1;
+
+            connection.MessageReceived += (msg) =>
+            {
+                if (BinaryMessageSerializer.TryParseHeader(msg, out var header))
+                {
+                    if (header.Type == MessageTypes.DocumentChanged)
+                    {
+                        var text = BinaryMessageSerializer.ParseDocumentChanged(msg, out int docId, out int offset, out int addedLength, out int deletedLength);
+                        finalDocId = docId;
+                        receivedLoadResponse = true;
+                    }
+                }
+            };
+
+            string tempFile = Path.Combine(Path.GetTempPath(), "ipc_batch_test.txt");
+            File.WriteAllText(tempFile, "Line 1\nLine 2\nLine 3");
+
+            try
+            {
+                byte[] loadMsg = new byte[BinaryMessageSerializer.HeaderSize + 4 + tempFile.Length * 2];
+                BinaryMessageSerializer.WriteLoadFile(loadMsg, tempFile);
+                connection.Send(loadMsg);
+
+                int retries = 0;
+                while (!receivedLoadResponse && retries++ < 50)
+                {
+                    System.Threading.Thread.Sleep(100);
+                }
+                Assert.True(receivedLoadResponse, "Load file response not received");
+                Assert.True(finalDocId > 0);
+
+                bool receivedBatchResponse = false;
+                connection.MessageReceived += (msg) =>
+                {
+                    if (BinaryMessageSerializer.TryParseHeader(msg, out var header))
+                    {
+                        if (header.Type == MessageTypes.BatchEditResponse)
+                        {
+                            receivedBatchResponse = true;
+                        }
+                    }
+                };
+
+                // Send BatchEditRequest inserting 'x' at offset 2, 9, 16
+                var edits = new[]
+                {
+                    new TextEdit { Offset = 2, DeleteLength = 0, Text = "x" },
+                    new TextEdit { Offset = 9, DeleteLength = 0, Text = "x" },
+                    new TextEdit { Offset = 16, DeleteLength = 0, Text = "x" }
+                };
+
+                int editsBytes = 0;
+                foreach (var edit in edits)
+                {
+                    editsBytes += sizeof(int) * 3 + edit.Text.Length * sizeof(char);
+                }
+                byte[] batchMsg = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + editsBytes];
+                BinaryMessageSerializer.WriteBatchEditRequest(batchMsg, finalDocId, edits);
+                connection.Send(batchMsg);
+
+                retries = 0;
+                while (!receivedBatchResponse && retries++ < 50)
+                {
+                    System.Threading.Thread.Sleep(100);
+                }
+                Assert.True(receivedBatchResponse, "Batch edit response not received");
+
+                var doc = connection.GetDocument(finalDocId) as Document;
+                Assert.NotNull(doc);
+                char[] textBuf = new char[doc.Length];
+                doc.PieceTable.GetText(0, doc.Length, textBuf);
+                Assert.Equal("Lixne 1\nLixne 2\nLixne 3", new string(textBuf));
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                    File.Delete(tempFile);
+            }
+        }
     }
 }
+

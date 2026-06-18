@@ -86,5 +86,25 @@ namespace SpanCoder.Tests
             Assert.NotNull(perfControl);
             Assert.True(perfControl.ClipToBounds);
         }
+
+        [AvaloniaFact]
+        public void TestShellWindowOnClosingNoLingering()
+        {
+            var window = new ShellWindow();
+            window.InitializeLayout();
+            
+            var ctor = typeof(WindowClosingEventArgs).GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .OrderBy(c => c.GetParameters().Length)
+                .FirstOrDefault();
+            Assert.NotNull(ctor);
+            var parameters = ctor.GetParameters().Select(p => p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null).ToArray();
+            var e = (WindowClosingEventArgs)ctor.Invoke(parameters);
+
+            var method = typeof(ShellWindow).GetMethod("OnClosing", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(window, new object[] { e });
+            
+            Assert.False(e.Cancel);
+        }
     }
 }

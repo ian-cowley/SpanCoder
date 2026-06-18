@@ -56,12 +56,12 @@ namespace SpanCoder.App
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
             int port = ((IPEndPoint)_listener.LocalEndpoint).Port;
-            Console.WriteLine($"[IpcConnection] Bound TcpListener to port {port}");
+            LogHelper.Log($"[IpcConnection] Bound TcpListener to port {port}");
 
             // 2. Spawn Engine Process
             string arguments;
             string executable = GetEngineExecutable(out arguments, port);
-            Console.WriteLine($"[IpcConnection] Spawning engine: {executable} {arguments}");
+            LogHelper.Log($"[IpcConnection] Spawning engine: {executable} {arguments}");
 
             var psi = new ProcessStartInfo
             {
@@ -88,7 +88,7 @@ namespace SpanCoder.App
                     {
                         string? line = await _engineProcess.StandardOutput.ReadLineAsync();
                         if (line == null) break;
-                        Console.WriteLine($"[Engine-Out] {line}");
+                        LogHelper.Log($"[Engine-Out] {line}");
                     }
                 }
                 catch { }
@@ -101,7 +101,7 @@ namespace SpanCoder.App
                     {
                         string? line = await _engineProcess.StandardError.ReadLineAsync();
                         if (line == null) break;
-                        Console.WriteLine($"[Engine-Err] {line}");
+                        LogHelper.Log($"[Engine-Err] {line}");
                     }
                 }
                 catch { }
@@ -114,7 +114,7 @@ namespace SpanCoder.App
             {
                 _client = acceptTask.Result;
                 _stream = _client.GetStream();
-                Console.WriteLine("[IpcConnection] Connected to engine process.");
+                LogHelper.Log("[IpcConnection] Connected to engine process.");
             }
             else
             {
@@ -126,6 +126,10 @@ namespace SpanCoder.App
 
         public void Send(byte[] message)
         {
+            if (BinaryMessageSerializer.TryParseHeader(message, out var header))
+            {
+                LogHelper.Log($"[IpcConnection] Send: Type={header.Type}, DocumentId={header.DocumentId}, Length={header.Length}");
+            }
             if (_stream == null) return;
 
             // Track outgoing edits for crash recovery
@@ -141,14 +145,20 @@ namespace SpanCoder.App
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[IpcConnection] Socket write failed: {ex.Message}");
+                LogHelper.Log($"[IpcConnection] Socket write failed: {ex.Message}");
                 HandleCrash();
             }
         }
 
         public IDocumentView? GetDocument(int documentId)
         {
-            _documentMirrors.TryGetValue(documentId, out var doc);
+            int lookupId = documentId;
+            if (_oldToNewIdMap.TryGetValue(documentId, out int newId))
+            {
+                lookupId = newId;
+            }
+            bool exists = _documentMirrors.TryGetValue(lookupId, out var doc);
+            LogHelper.Log($"[IpcConnection] GetDocument: originalId={documentId}, lookupId={lookupId}, exists={exists}, docLength={doc?.Length}");
             return doc;
         }
 
@@ -166,7 +176,7 @@ namespace SpanCoder.App
                 // We temporarily store a pending state mapping
                 _pathToOldIdMap[filePath] = -1; 
             }
-            else if (header.Type == MessageTypes.InsertText || header.Type == MessageTypes.DeleteText)
+            else if (header.Type == MessageTypes.InsertText || header.Type == MessageTypes.DeleteText || header.Type == MessageTypes.BatchEditRequest)
             {
                 int docId = header.DocumentId;
                 if (_trackedStates.TryGetValue(docId, out var state))
@@ -221,7 +231,7 @@ namespace SpanCoder.App
                 {
                     if (!_cts.Token.IsCancellationRequested)
                     {
-                        Console.WriteLine($"[IpcConnection] Socket read error: {ex.Message}");
+                        LogHelper.Log($"[IpcConnection] Socket read error: {ex.Message}");
                         HandleCrash();
                     }
                 }
@@ -231,6 +241,7 @@ namespace SpanCoder.App
         private void ProcessIncomingMessage(ReadOnlySpan<byte> message)
         {
             if (!BinaryMessageSerializer.TryParseHeader(message, out var header)) return;
+            LogHelper.Log($"[IpcConnection] ProcessIncomingMessage: Type={header.Type}, DocumentId={header.DocumentId}, Length={header.Length}");
 
             if (header.Type == MessageTypes.DocumentChanged)
             {
@@ -262,10 +273,25 @@ namespace SpanCoder.App
                 // 2. Synchronize local document mirror
                 UpdateLocalMirror(docId, offset, addedLength, deletedLength, text);
             }
+            else if (header.Type == MessageTypes.BatchEditResponse)
+            {
+                var edits = BinaryMessageSerializer.ParseBatchEditResponse(message, out int docId);
+                UpdateLocalMirrorForBatch(docId, edits);
+            }
         }
 
         private void UpdateLocalMirror(int docId, int offset, int addedLength, int deletedLength, ReadOnlySpan<char> insertedText)
         {
+            if (Avalonia.Application.Current != null && !Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            {
+                string textStr = insertedText.ToString();
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    UpdateLocalMirror(docId, offset, addedLength, deletedLength, textStr.AsSpan());
+                });
+                return;
+            }
+
             if (offset == 0 && deletedLength == 0 && addedLength == insertedText.Length)
             {
                 // File load or reload
@@ -310,6 +336,38 @@ namespace SpanCoder.App
                         doc.Insert(offset, insertedText);
                     }
                 }
+            }
+        }
+
+        private void UpdateLocalMirrorForBatch(int docId, TextEdit[] edits)
+        {
+            if (Avalonia.Application.Current != null && !Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    UpdateLocalMirrorForBatch(docId, edits);
+                });
+                return;
+            }
+
+            LogHelper.Log($"[IpcConnection] UpdateLocalMirrorForBatch: docId={docId}, editsCount={edits.Length}, documentExists={_documentMirrors.ContainsKey(docId)}");
+            if (_documentMirrors.TryGetValue(docId, out var doc))
+            {
+                LogHelper.Log($"[IpcConnection] UpdateLocalMirrorForBatch: doc beforeLength={doc.Length}");
+                var sortedEdits = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.OrderByDescending(edits, e => e.Offset));
+                foreach (var edit in sortedEdits)
+                {
+                    LogHelper.Log($"[IpcConnection] UpdateLocalMirrorForBatch applying edit: offset={edit.Offset}, deleteLen={edit.DeleteLength}, text='{edit.Text}'");
+                    if (edit.DeleteLength > 0)
+                    {
+                        doc.Delete(edit.Offset, edit.DeleteLength);
+                    }
+                    if (!string.IsNullOrEmpty(edit.Text))
+                    {
+                        doc.Insert(edit.Offset, edit.Text);
+                    }
+                }
+                LogHelper.Log($"[IpcConnection] UpdateLocalMirrorForBatch: doc afterLength={doc.Length}");
             }
         }
 

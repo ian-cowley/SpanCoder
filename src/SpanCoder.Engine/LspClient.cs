@@ -452,6 +452,42 @@ namespace SpanCoder.Engine
             return Array.Empty<DocumentSymbolItem>();
         }
 
+        public async Task<FoldingRangeItem[]> RequestFoldingRangesAsync(string filePath)
+        {
+            string uri = FilePathToUri(filePath);
+            string escapedUri = EscapeJsonString(uri);
+            int id = Interlocked.Increment(ref _nextRequestId);
+            var tcs = new TaskCompletionSource<JsonElement>();
+            _pendingRequests[id] = tcs;
+
+            string json = $"{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"textDocument/foldingRange\",\"params\":{{\"textDocument\":{{\"uri\":\"{escapedUri}\"}}}}}}";
+            SendRaw(json);
+
+            try
+            {
+                var response = await tcs.Task;
+                if (response.ValueKind == JsonValueKind.Array)
+                {
+                    int len = response.GetArrayLength();
+                    var list = new System.Collections.Generic.List<FoldingRangeItem>();
+                    for (int i = 0; i < len; i++)
+                    {
+                        var el = response[i];
+                        int startLine = el.GetProperty("startLine").GetInt32();
+                        int endLine = el.GetProperty("endLine").GetInt32();
+                        list.Add(new FoldingRangeItem { StartLine = startLine, EndLine = endLine });
+                    }
+                    return list.ToArray();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"FoldingRange request failed: {ex.Message}");
+                Console.WriteLine($"[LspClient] FoldingRange request failed: {ex.Message}");
+            }
+            return Array.Empty<FoldingRangeItem>();
+        }
+
         public struct LspTextEdit
         {
             public string FilePath;

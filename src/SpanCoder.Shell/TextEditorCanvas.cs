@@ -75,8 +75,32 @@ namespace SpanCoder.Shell
             if (Document == null) return 0;
             int lineCount = Document.GetLineCount();
             int digits = Math.Max(2, (int)Math.Log10(Math.Max(1, lineCount)) + 1);
-            return digits * CharWidth + 15.0;
+            return digits * CharWidth + 25.0;
         }
+        
+
+        public class FoldingRange
+        {
+            public int StartLine { get; set; } // 0-indexed
+            public int EndLine { get; set; }   // 0-indexed
+            public bool IsFolded { get; set; }
+        }
+
+        private readonly System.Collections.Generic.List<FoldingRange> _foldingRanges = new();
+        private readonly System.Collections.Generic.List<int> _visibleLines = new();
+        private int[] _docToVisualLine = Array.Empty<int>();
+
+        public System.Collections.Generic.IReadOnlyList<FoldingRange> FoldingRanges => _foldingRanges;
+        public System.Collections.Generic.IReadOnlyList<int> VisibleLines => _visibleLines;
+        public int[] DocToVisualLineMap => _docToVisualLine;
+
+        public event Action? LayoutChanged;
+
+        // Caret state
+        public int CaretLine { get; private set; } = 0;
+        public int CaretCol { get; private set; } = 0;
+        public int CaretAbsoluteOffset { get; private set; } = 0;
+        private bool _caretVisible = true;
         
         public struct ExtraCaret
         {
@@ -85,16 +109,15 @@ namespace SpanCoder.Shell
             public int AbsoluteOffset { get; set; }
         }
 
-        // Caret state
-        public int CaretLine { get; private set; } = 0;
-        public int CaretCol { get; private set; } = 0;
-        public int CaretAbsoluteOffset { get; private set; } = 0;
-        private bool _caretVisible = true;
         private readonly System.Collections.Generic.List<ExtraCaret> _extraCarets = new();
         public System.Collections.Generic.IReadOnlyList<ExtraCaret> ExtraCarets => _extraCarets;
+
         private int _selectionStartOffset = -1;
         private int _selectionEndOffset = -1;
         private bool _isDragging;
+        private bool _isBlockDragging;
+        private int _blockDragStartLine;
+        private int _blockDragStartCol;
         private readonly System.Collections.Generic.List<LineState> _lineStates = new();
         private DispatcherTimer? _caretTimer;
 
@@ -209,6 +232,7 @@ namespace SpanCoder.Shell
 
         public event Action<int, string>? TextInputReceived;
         public event Action<int, int>? TextDeleteReceived;
+        public event Action<TextEdit[]>? BatchEditReceived;
         public event Action? CaretMoved;
         public event Action<double, double>? ScrollRequested;
 
@@ -288,29 +312,38 @@ namespace SpanCoder.Shell
             double targetY = _lastMousePos.Y + ScrollY;
             double targetX = _lastMousePos.X + ScrollX;
 
-            int lineIndex = (int)(targetY / LineHeight);
+            int visibleLineIndex = (int)(targetY / LineHeight);
+            int lineIndex = 0;
+            if (_visibleLines.Count > 0)
+            {
+                if (visibleLineIndex < 0 || visibleLineIndex >= _visibleLines.Count) return;
+                lineIndex = _visibleLines[visibleLineIndex];
+            }
+            else
+            {
+                int lineCount = Document.GetLineCount();
+                if (visibleLineIndex < 0 || visibleLineIndex >= lineCount) return;
+                lineIndex = visibleLineIndex;
+            }
+
             double gutterWidth = GetGutterWidth();
             int colIndex = (int)Math.Round((targetX - gutterWidth - 10) / CharWidth);
             colIndex = Math.Max(0, colIndex);
 
-            int lineCount = Document.GetLineCount();
-            if (lineIndex >= 0 && lineIndex < lineCount)
+            long start = Document.GetLineStart(lineIndex);
+            long end = (lineIndex + 1 < Document.GetLineCount()) ? Document.GetLineStart(lineIndex + 1) : Document.Length;
+            int lineLen = (int)(end - start);
+
+            var lineSpan = Document.GetLine(lineIndex, out _, out var rented);
+            int printableLen = lineLen;
+            if (printableLen > 0 && lineSpan[printableLen - 1] == '\n') printableLen--;
+            if (printableLen > 0 && lineSpan[printableLen - 1] == '\r') printableLen--;
+            if (rented != null) ArrayPool<char>.Shared.Return(rented);
+
+            if (colIndex >= 0 && colIndex <= printableLen)
             {
-                long start = Document.GetLineStart(lineIndex);
-                long end = (lineIndex + 1 < lineCount) ? Document.GetLineStart(lineIndex + 1) : Document.Length;
-                int lineLen = (int)(end - start);
-
-                var lineSpan = Document.GetLine(lineIndex, out _, out var rented);
-                int printableLen = lineLen;
-                if (printableLen > 0 && lineSpan[printableLen - 1] == '\n') printableLen--;
-                if (printableLen > 0 && lineSpan[printableLen - 1] == '\r') printableLen--;
-                if (rented != null) ArrayPool<char>.Shared.Return(rented);
-
-                if (colIndex >= 0 && colIndex <= printableLen)
-                {
-                    int offset = (int)start + colIndex;
-                    HoverRequested?.Invoke(offset, _lastMousePos.X, _lastMousePos.Y);
-                }
+                int offset = (int)start + colIndex;
+                HoverRequested?.Invoke(offset, _lastMousePos.X, _lastMousePos.Y);
             }
         }
 
@@ -322,6 +355,7 @@ namespace SpanCoder.Shell
         public void MoveCaret(int line, int col)
         {
             if (Document == null) return;
+            LogHelper.Log($"[TextEditorCanvas] MoveCaret: line={line}, col={col} (current CaretLine={CaretLine}, CaretCol={CaretCol})");
             int lineCount = Document.GetLineCount();
             CaretLine = Math.Max(0, Math.Min(line, lineCount - 1));
 
@@ -352,6 +386,7 @@ namespace SpanCoder.Shell
             CaretMoved?.Invoke();
             EnsureCaretVisible();
             InvalidateVisual();
+            LogHelper.Log($"[TextEditorCanvas] MoveCaret finished: CaretLine={CaretLine}, CaretCol={CaretCol}, CaretAbsoluteOffset={CaretAbsoluteOffset}");
         }
 
         public void EnsureCaretVisible()
@@ -359,8 +394,9 @@ namespace SpanCoder.Shell
             if (Document == null || Bounds.Height <= 0 || Bounds.Width <= 0) return;
 
             double dy = 0;
-            double caretTopY = CaretLine * LineHeight;
-            double caretBottomY = (CaretLine + 1) * LineHeight;
+            int caretVisibleIndex = _docToVisualLine.Length > CaretLine ? _docToVisualLine[CaretLine] : CaretLine;
+            double caretTopY = caretVisibleIndex * LineHeight;
+            double caretBottomY = (caretVisibleIndex + 1) * LineHeight;
 
             if (caretTopY < ScrollY)
             {
@@ -398,6 +434,7 @@ namespace SpanCoder.Shell
         public void MoveCaretToOffset(int absoluteOffset)
         {
             if (Document == null) return;
+            LogHelper.Log($"[TextEditorCanvas] MoveCaretToOffset: absoluteOffset={absoluteOffset}");
             int lineCount = Document.GetLineCount();
             if (lineCount <= 0)
             {
@@ -429,152 +466,32 @@ namespace SpanCoder.Shell
             MoveCaret(targetLine, col);
         }
 
-        private ExtraCaret CreateExtraCaretFromOffset(int absoluteOffset)
-        {
-            if (Document == null) return new ExtraCaret { AbsoluteOffset = absoluteOffset, Line = 0, Col = 0 };
-            int lineCount = Document.GetLineCount();
-            if (lineCount <= 0) return new ExtraCaret { AbsoluteOffset = 0, Line = 0, Col = 0 };
-
-            int low = 0;
-            int high = lineCount - 1;
-            int targetLine = 0;
-
-            while (low <= high)
-            {
-                int mid = low + (high - low) / 2;
-                long start = Document.GetLineStart(mid);
-                if (start <= absoluteOffset)
-                {
-                    targetLine = mid;
-                    low = mid + 1;
-                }
-                else
-                {
-                    high = mid - 1;
-                }
-            }
-
-            long lineStart = Document.GetLineStart(targetLine);
-            long end = (targetLine + 1 < lineCount) ? Document.GetLineStart(targetLine + 1) : Document.Length;
-            int lineLen = (int)(end - lineStart);
-
-            int col = absoluteOffset - (int)lineStart;
-            int clampedCol = col;
-
-            if (lineLen > 0)
-            {
-                var lineSpan = Document.GetLine(targetLine, out var isCont, out var rented);
-                int printableLen = lineLen;
-                if (printableLen > 0 && lineSpan[printableLen - 1] == '\n') printableLen--;
-                if (printableLen > 0 && lineSpan[printableLen - 1] == '\r') printableLen--;
-                if (rented != null) ArrayPool<char>.Shared.Return(rented);
-                
-                clampedCol = Math.Max(0, Math.Min(col, printableLen));
-            }
-            else
-            {
-                clampedCol = 0;
-            }
-
-            return new ExtraCaret
-            {
-                AbsoluteOffset = (int)lineStart + clampedCol,
-                Line = targetLine,
-                Col = clampedCol
-            };
-        }
-
-        private void DeduplicateCarets()
-        {
-            int primaryOffset = GetCaretAbsoluteOffset();
-            var uniqueOffsets = new System.Collections.Generic.HashSet<int> { primaryOffset };
-            for (int i = _extraCarets.Count - 1; i >= 0; i--)
-            {
-                int offset = _extraCarets[i].AbsoluteOffset;
-                if (uniqueOffsets.Contains(offset))
-                {
-                    _extraCarets.RemoveAt(i);
-                }
-                else
-                {
-                    uniqueOffsets.Add(offset);
-                }
-            }
-        }
-
-        public System.Collections.Generic.List<int> GetCaretOffsetsDescending()
-        {
-            var offsets = new System.Collections.Generic.List<int> { GetCaretAbsoluteOffset() };
-            foreach (var ec in _extraCarets)
-            {
-                offsets.Add(ec.AbsoluteOffset);
-            }
-            offsets.Sort((a, b) => b.CompareTo(a)); // Descending order
-            var unique = new System.Collections.Generic.List<int>();
-            foreach (var o in offsets)
-            {
-                if (unique.Count == 0 || unique[^1] != o)
-                {
-                    unique.Add(o);
-                }
-            }
-            return unique;
-        }
-
-        private int AdjustOffset(int offset, int editOffset, int addedLength, int deletedLength)
-        {
-            if (addedLength > 0)
-            {
-                if (offset >= editOffset)
-                {
-                    offset += addedLength;
-                }
-            }
-            else if (deletedLength > 0)
-            {
-                if (offset > editOffset)
-                {
-                    int shift = Math.Min(offset - editOffset, deletedLength);
-                    offset -= shift;
-                }
-            }
-            return offset;
-        }
-
         public void AdjustCaret(int editOffset, int addedLength, int deletedLength)
         {
             _selectionStartOffset = -1;
             _selectionEndOffset = -1;
             if (Document == null) return;
             UpdateLineStates(0);
+            RecomputeFoldingRanges();
+            UpdateFoldingLayout();
 
-            // Adjust primary caret
             int caretOffset = GetCaretAbsoluteOffset();
-            caretOffset = AdjustOffset(caretOffset, editOffset, addedLength, deletedLength);
-            MoveCaretToOffset(caretOffset);
-
-            // Adjust extra carets
-            for (int i = 0; i < _extraCarets.Count; i++)
+            if (addedLength > 0)
             {
-                var ec = _extraCarets[i];
-                int ecOffset = AdjustOffset(ec.AbsoluteOffset, editOffset, addedLength, deletedLength);
-                _extraCarets[i] = CreateExtraCaretFromOffset(ecOffset);
+                if (caretOffset >= editOffset)
+                {
+                    caretOffset += addedLength;
+                }
             }
-
-            DeduplicateCarets();
-            InvalidateVisual();
-        }
-
-        internal void AddExtraCaretForTest(int absoluteOffset)
-        {
-            var newCaret = CreateExtraCaretFromOffset(absoluteOffset);
-            _extraCarets.Add(newCaret);
-            InvalidateVisual();
-        }
-
-        internal void ClearExtraCaretsForTest()
-        {
-            _extraCarets.Clear();
+            else if (deletedLength > 0)
+            {
+                if (caretOffset > editOffset)
+                {
+                    int shift = Math.Min(caretOffset - editOffset, deletedLength);
+                    caretOffset -= shift;
+                }
+            }
+            MoveCaretToOffset(caretOffset);
             InvalidateVisual();
         }
 
@@ -599,19 +516,42 @@ namespace SpanCoder.Shell
             return (targetLine, clampedCol);
         }
 
-        private (int Line, int Col) GetNewCaretPosLeft(int line, int col)
+        private (int Line, int Col) GetNewCaretPosLeft(int line, int col, bool preventWrap = false)
         {
             if (Document == null) return (0, 0);
             if (col > 0)
             {
                 return (line, col - 1);
             }
+            
+            if (preventWrap)
+            {
+                return (line, col);
+            }
+
+            if (_visibleLines.Count > 0)
+            {
+                int v = _docToVisualLine.Length > line ? _docToVisualLine[line] : 0;
+                if (v > 0)
+                {
+                    int prevLine = _visibleLines[v - 1];
+                    long start = Document.GetLineStart(prevLine);
+                    long end = (prevLine + 1 < Document.GetLineCount()) ? Document.GetLineStart(prevLine + 1) : Document.Length;
+                    int prevLen = (int)(end - start);
+                    var lineSpan = Document.GetLine(prevLine, out _, out var rented);
+                    int printableLen = prevLen;
+                    if (printableLen > 0 && lineSpan[printableLen - 1] == '\n') printableLen--;
+                    if (printableLen > 0 && lineSpan[printableLen - 1] == '\r') printableLen--;
+                    if (rented != null) ArrayPool<char>.Shared.Return(rented);
+                    return (prevLine, printableLen);
+                }
+            }
             else if (line > 0)
             {
                 long start = Document.GetLineStart(line - 1);
                 long end = Document.GetLineStart(line);
                 int prevLen = (int)(end - start);
-                var lineSpan = Document.GetLine(line - 1, out var isCont, out var rented);
+                var lineSpan = Document.GetLine(line - 1, out _, out var rented);
                 int printableLen = prevLen;
                 if (printableLen > 0 && lineSpan[printableLen - 1] == '\n') printableLen--;
                 if (printableLen > 0 && lineSpan[printableLen - 1] == '\r') printableLen--;
@@ -621,14 +561,14 @@ namespace SpanCoder.Shell
             return (line, col);
         }
 
-        private (int Line, int Col) GetNewCaretPosRight(int line, int col)
+        private (int Line, int Col) GetNewCaretPosRight(int line, int col, bool preventWrap = false)
         {
             if (Document == null) return (0, 0);
             int lineCount = Document.GetLineCount();
             long start = Document.GetLineStart(line);
             long end = (line + 1 < lineCount) ? Document.GetLineStart(line + 1) : Document.Length;
             int lineLen = (int)(end - start);
-            var lineSpan = Document.GetLine(line, out var isCont, out var rented);
+            var lineSpan = Document.GetLine(line, out _, out var rented);
             int printableLen = lineLen;
             if (printableLen > 0 && lineSpan[printableLen - 1] == '\n') printableLen--;
             if (printableLen > 0 && lineSpan[printableLen - 1] == '\r') printableLen--;
@@ -637,6 +577,20 @@ namespace SpanCoder.Shell
             if (col < printableLen)
             {
                 return (line, col + 1);
+            }
+            
+            if (preventWrap)
+            {
+                return (line, col);
+            }
+
+            if (_visibleLines.Count > 0)
+            {
+                int v = _docToVisualLine.Length > line ? _docToVisualLine[line] : 0;
+                if (v + 1 < _visibleLines.Count)
+                {
+                    return (_visibleLines[v + 1], 0);
+                }
             }
             else if (line + 1 < lineCount)
             {
@@ -648,7 +602,15 @@ namespace SpanCoder.Shell
         private (int Line, int Col) GetNewCaretPosUp(int line, int col)
         {
             if (Document == null) return (0, 0);
-            if (line > 0)
+            if (_visibleLines.Count > 0)
+            {
+                int v = _docToVisualLine.Length > line ? _docToVisualLine[line] : 0;
+                if (v > 0)
+                {
+                    return ClampToPrintable(_visibleLines[v - 1], col);
+                }
+            }
+            else if (line > 0)
             {
                 return ClampToPrintable(line - 1, col);
             }
@@ -658,10 +620,21 @@ namespace SpanCoder.Shell
         private (int Line, int Col) GetNewCaretPosDown(int line, int col)
         {
             if (Document == null) return (0, 0);
-            int lineCount = Document.GetLineCount();
-            if (line + 1 < lineCount)
+            if (_visibleLines.Count > 0)
             {
-                return ClampToPrintable(line + 1, col);
+                int v = _docToVisualLine.Length > line ? _docToVisualLine[line] : 0;
+                if (v + 1 < _visibleLines.Count)
+                {
+                    return ClampToPrintable(_visibleLines[v + 1], col);
+                }
+            }
+            else
+            {
+                int lineCount = Document.GetLineCount();
+                if (line + 1 < lineCount)
+                {
+                    return ClampToPrintable(line + 1, col);
+                }
             }
             return (line, col);
         }
@@ -672,6 +645,8 @@ namespace SpanCoder.Shell
             if (change.Property == DocumentProperty)
             {
                 UpdateLineStates(0);
+                RecomputeFoldingRanges();
+                UpdateFoldingLayout();
             }
         }
 
@@ -706,6 +681,200 @@ namespace SpanCoder.Shell
             }
         }
 
+        public int GetVisibleLineCount()
+        {
+            if (Document == null) return 0;
+            return _visibleLines.Count > 0 ? _visibleLines.Count : Document.GetLineCount();
+        }
+
+        public void SetFoldingRangesFromLsp(FoldingRangeItem[] items)
+        {
+            if (Document == null) return;
+            var oldRanges = _foldingRanges.ToList();
+            _foldingRanges.Clear();
+
+            foreach (var item in items)
+            {
+                _foldingRanges.Add(new FoldingRange
+                {
+                    StartLine = item.StartLine,
+                    EndLine = item.EndLine,
+                    IsFolded = false
+                });
+            }
+
+            RestoreFoldedStates(oldRanges);
+            UpdateFoldingLayout();
+            InvalidateVisual();
+        }
+
+        private void RestoreFoldedStates(System.Collections.Generic.List<FoldingRange> oldRanges)
+        {
+            foreach (var newRange in _foldingRanges)
+            {
+                var match = oldRanges.FirstOrDefault(r => r.StartLine == newRange.StartLine);
+                if (match == null)
+                {
+                    string newStartLineText = GetTrimmedLineText(newRange.StartLine);
+                    match = oldRanges.FirstOrDefault(r => Math.Abs(r.StartLine - newRange.StartLine) < 50
+                        && GetTrimmedLineText(r.StartLine) == newStartLineText);
+                }
+
+                if (match != null)
+                {
+                    newRange.IsFolded = match.IsFolded;
+                    oldRanges.Remove(match);
+                }
+            }
+        }
+
+        private void RecomputeFoldingRanges()
+        {
+            if (Document == null) return;
+            int lineCount = Document.GetLineCount();
+
+            var oldRanges = _foldingRanges.ToList();
+            _foldingRanges.Clear();
+
+            var braceStack = new System.Collections.Generic.Stack<int>();
+            var regionStack = new System.Collections.Generic.Stack<int>();
+
+            string extension = System.IO.Path.GetExtension(Document.FilePath ?? "");
+            LineState lexerState = LineState.Normal;
+
+            for (int i = 0; i < lineCount; i++)
+            {
+                var lineSpan = Document.GetLine(i, out _, out var rented);
+                int len = lineSpan.Length;
+                if (len > 0 && lineSpan[len - 1] == '\n') len--;
+                if (len > 0 && lineSpan[len - 1] == '\r') len--;
+                var cleanSpan = lineSpan.Slice(0, len);
+
+                string lineStr = cleanSpan.ToString().Trim();
+                if (lineStr.StartsWith("#region", StringComparison.OrdinalIgnoreCase))
+                {
+                    regionStack.Push(i);
+                }
+                else if (lineStr.StartsWith("#endregion", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (regionStack.Count > 0)
+                    {
+                        int start = regionStack.Pop();
+                        if (i > start)
+                        {
+                            _foldingRanges.Add(new FoldingRange { StartLine = start, EndLine = i, IsFolded = false });
+                        }
+                    }
+                }
+
+                var lexer = new DocumentLexer(cleanSpan, extension, lexerState);
+                while (lexer.NextToken(out var token, out var nextState))
+                {
+                    lexerState = nextState;
+                    if (token.Type == TokenType.String || token.Type == TokenType.Comment)
+                    {
+                        continue;
+                    }
+
+                    var tokenText = cleanSpan.Slice(token.Start, token.Length);
+                    for (int charIdx = 0; charIdx < tokenText.Length; charIdx++)
+                    {
+                        char c = tokenText[charIdx];
+                        if (c == '{')
+                        {
+                            braceStack.Push(i);
+                        }
+                        else if (c == '}')
+                        {
+                            if (braceStack.Count > 0)
+                            {
+                                int start = braceStack.Pop();
+                                if (i > start)
+                                {
+                                    _foldingRanges.Add(new FoldingRange { StartLine = start, EndLine = i, IsFolded = false });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (rented != null) ArrayPool<char>.Shared.Return(rented);
+            }
+
+            RestoreFoldedStates(oldRanges);
+        }
+
+        public void UpdateFoldingLayout()
+        {
+            _visibleLines.Clear();
+            if (Document == null)
+            {
+                _docToVisualLine = Array.Empty<int>();
+                LayoutChanged?.Invoke();
+                return;
+            }
+
+            int lineCount = Document.GetLineCount();
+            if (_docToVisualLine.Length < lineCount)
+            {
+                _docToVisualLine = new int[lineCount * 2];
+            }
+
+            for (int i = 0; i < lineCount; i++)
+            {
+                if (IsLineVisible(i))
+                {
+                    _docToVisualLine[i] = _visibleLines.Count;
+                    _visibleLines.Add(i);
+                }
+                else
+                {
+                    int headerLine = FindFoldingHeader(i);
+                    _docToVisualLine[i] = headerLine >= 0 ? _docToVisualLine[headerLine] : 0;
+                }
+            }
+
+            LayoutChanged?.Invoke();
+            InvalidateVisual();
+        }
+
+        private bool IsLineVisible(int lineIndex)
+        {
+            foreach (var r in _foldingRanges)
+            {
+                if (r.IsFolded && lineIndex > r.StartLine && lineIndex <= r.EndLine)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private int FindFoldingHeader(int lineIndex)
+        {
+            int innermostStart = -1;
+            foreach (var r in _foldingRanges)
+            {
+                if (r.IsFolded && lineIndex > r.StartLine && lineIndex <= r.EndLine)
+                {
+                    if (innermostStart == -1 || r.StartLine > innermostStart)
+                    {
+                        innermostStart = r.StartLine;
+                    }
+                }
+            }
+            return innermostStart;
+        }
+
+        private string GetTrimmedLineText(int lineIndex)
+        {
+            if (Document == null || lineIndex < 0 || lineIndex >= Document.GetLineCount()) return "";
+            var span = Document.GetLine(lineIndex, out _, out var rented);
+            string s = span.ToString().Trim();
+            if (rented != null) ArrayPool<char>.Shared.Return(rented);
+            return s;
+        }
+
 
         protected override void OnPointerPressed(PointerPressedEventArgs e)
         {
@@ -717,10 +886,33 @@ namespace SpanCoder.Shell
 
             if (pos.X < gutterWidth)
             {
-                int clickedLine = (int)((pos.Y + ScrollY) / LineHeight) + 1;
+                int visibleLineIndex = (int)((pos.Y + ScrollY) / LineHeight);
+                int clickedLine = 0;
+                if (_visibleLines.Count > 0 && visibleLineIndex >= 0 && visibleLineIndex < _visibleLines.Count)
+                {
+                    clickedLine = _visibleLines[visibleLineIndex] + 1;
+                }
+                else
+                {
+                    clickedLine = visibleLineIndex + 1;
+                }
+
                 if (Document != null && clickedLine >= 1 && clickedLine <= Document.GetLineCount())
                 {
-                    ToggleBreakpoint(clickedLine);
+                    if (pos.X >= gutterWidth - 15)
+                    {
+                        var range = _foldingRanges.FirstOrDefault(r => r.StartLine == clickedLine - 1);
+                        if (range != null)
+                        {
+                            range.IsFolded = !range.IsFolded;
+                            UpdateFoldingLayout();
+                            InvalidateVisual();
+                        }
+                    }
+                    else
+                    {
+                        ToggleBreakpoint(clickedLine);
+                    }
                 }
                 e.Handled = true;
                 return;
@@ -728,44 +920,44 @@ namespace SpanCoder.Shell
 
             if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             {
-                int clickOffset = GetOffsetFromPointer(pos);
-                if (e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+                bool isAltPressed = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+                LogHelper.Log($"[TextEditorCanvas] OnPointerPressed: IsLeftButtonPressed=true, isAltPressed={isAltPressed}");
+                if (isAltPressed)
                 {
-                    var newCaret = CreateExtraCaretFromOffset(clickOffset);
-                    int primaryOffset = GetCaretAbsoluteOffset();
-                    if (newCaret.AbsoluteOffset == primaryOffset)
-                    {
-                        // Keep primary caret, do nothing or keep it as is
-                    }
-                    else
-                    {
-                        int existingIdx = _extraCarets.FindIndex(c => c.AbsoluteOffset == newCaret.AbsoluteOffset);
-                        if (existingIdx >= 0)
-                        {
-                            _extraCarets.RemoveAt(existingIdx);
-                        }
-                        else
-                        {
-                            _extraCarets.Add(newCaret);
-                        }
-                        InvalidateVisual();
-                    }
-                    _isDragging = false;
+                    _isBlockDragging = true;
+                    var (clickLine, clickCol) = GetLineColFromPointer(pos);
+                    _blockDragStartLine = clickLine;
+                    _blockDragStartCol = clickCol;
+
+                    _selectionStartOffset = -1;
+                    _selectionEndOffset = -1;
+                    _extraCarets.Clear();
+
+                    MoveCaret(clickLine, clickCol);
+                    e.Handled = true;
                 }
                 else
                 {
                     _extraCarets.Clear();
+                    int clickOffset = GetOffsetFromPointer(pos);
                     _selectionStartOffset = clickOffset;
                     _selectionEndOffset = clickOffset;
                     _isDragging = true;
                     MoveCaretToOffset(clickOffset);
+                    e.Handled = true;
                 }
-                e.Handled = true;
             }
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            LogHelper.Log($"[TextEditorCanvas] OnKeyDown: key={e.Key}, modifiers={e.KeyModifiers}, caretLine={CaretLine}, caretCol={CaretCol}, extraCaretsCount={_extraCarets.Count}");
+            if (e.Key == Key.LeftAlt || e.Key == Key.RightAlt)
+            {
+                LogHelper.Log($"[TextEditorCanvas] Handling Alt key in OnKeyDown to prevent menu focus steal");
+                e.Handled = true;
+                return;
+            }
             if (IsAutocompleteVisible)
             {
                 if (e.Key == Key.Up)
@@ -801,6 +993,14 @@ namespace SpanCoder.Shell
                 return;
             }
 
+            if (e.Key == Key.Escape && _extraCarets.Count > 0)
+            {
+                _extraCarets.Clear();
+                InvalidateVisual();
+                e.Handled = true;
+                return;
+            }
+
             base.OnKeyDown(e);
             if (Document == null) return;
 
@@ -827,14 +1027,6 @@ namespace SpanCoder.Shell
 
             switch (e.Key)
             {
-                case Key.Escape:
-                    if (_extraCarets.Count > 0)
-                    {
-                        _extraCarets.Clear();
-                        InvalidateVisual();
-                        e.Handled = true;
-                    }
-                    break;
                 case Key.F9:
                     ToggleBreakpoint(CaretLine + 1);
                     e.Handled = true;
@@ -856,70 +1048,126 @@ namespace SpanCoder.Shell
                     break;
                 case Key.Up:
                     {
+                        if (_extraCarets.Count > 0)
+                        {
+                            for (int i = 0; i < _extraCarets.Count; i++)
+                            {
+                                var extra = _extraCarets[i];
+                                var (nl, nc) = GetNewCaretPosUp(extra.Line, extra.Col);
+                                long start = Document.GetLineStart(nl);
+                                _extraCarets[i] = new ExtraCaret
+                                {
+                                    Line = nl,
+                                    Col = nc,
+                                    AbsoluteOffset = (int)start + nc
+                                };
+                            }
+                        }
                         var (newLine, newCol) = GetNewCaretPosUp(CaretLine, CaretCol);
                         MoveCaret(newLine, newCol);
-                        for (int i = 0; i < _extraCarets.Count; i++)
-                        {
-                            var ec = _extraCarets[i];
-                            var (el, ecCol) = GetNewCaretPosUp(ec.Line, ec.Col);
-                            long start = Document.GetLineStart(el);
-                            _extraCarets[i] = new ExtraCaret { Line = el, Col = ecCol, AbsoluteOffset = (int)start + ecCol };
-                        }
-                        DeduplicateCarets();
+                        DeduplicateExtraCarets();
                         e.Handled = true;
                     }
                     break;
                 case Key.Down:
                     {
+                        if (_extraCarets.Count > 0)
+                        {
+                            for (int i = 0; i < _extraCarets.Count; i++)
+                            {
+                                var extra = _extraCarets[i];
+                                var (nl, nc) = GetNewCaretPosDown(extra.Line, extra.Col);
+                                long start = Document.GetLineStart(nl);
+                                _extraCarets[i] = new ExtraCaret
+                                {
+                                    Line = nl,
+                                    Col = nc,
+                                    AbsoluteOffset = (int)start + nc
+                                };
+                            }
+                        }
                         var (newLine, newCol) = GetNewCaretPosDown(CaretLine, CaretCol);
                         MoveCaret(newLine, newCol);
-                        for (int i = 0; i < _extraCarets.Count; i++)
-                        {
-                            var ec = _extraCarets[i];
-                            var (el, ecCol) = GetNewCaretPosDown(ec.Line, ec.Col);
-                            long start = Document.GetLineStart(el);
-                            _extraCarets[i] = new ExtraCaret { Line = el, Col = ecCol, AbsoluteOffset = (int)start + ecCol };
-                        }
-                        DeduplicateCarets();
+                        DeduplicateExtraCarets();
                         e.Handled = true;
                     }
                     break;
                 case Key.Left:
                     {
-                        var (newLine, newCol) = GetNewCaretPosLeft(CaretLine, CaretCol);
-                        MoveCaret(newLine, newCol);
-                        for (int i = 0; i < _extraCarets.Count; i++)
+                        bool isMultiCaret = _extraCarets.Count > 0;
+                        if (isMultiCaret)
                         {
-                            var ec = _extraCarets[i];
-                            var (el, ecCol) = GetNewCaretPosLeft(ec.Line, ec.Col);
-                            long start = Document.GetLineStart(el);
-                            _extraCarets[i] = new ExtraCaret { Line = el, Col = ecCol, AbsoluteOffset = (int)start + ecCol };
+                            for (int i = 0; i < _extraCarets.Count; i++)
+                            {
+                                var extra = _extraCarets[i];
+                                var (nl, nc) = GetNewCaretPosLeft(extra.Line, extra.Col, preventWrap: true);
+                                long start = Document.GetLineStart(nl);
+                                _extraCarets[i] = new ExtraCaret
+                                {
+                                    Line = nl,
+                                    Col = nc,
+                                    AbsoluteOffset = (int)start + nc
+                                };
+                            }
                         }
-                        DeduplicateCarets();
+                        var (newLine, newCol) = GetNewCaretPosLeft(CaretLine, CaretCol, preventWrap: isMultiCaret);
+                        MoveCaret(newLine, newCol);
+                        DeduplicateExtraCarets();
                         e.Handled = true;
                     }
                     break;
                 case Key.Right:
                     {
-                        var (newLine, newCol) = GetNewCaretPosRight(CaretLine, CaretCol);
-                        MoveCaret(newLine, newCol);
-                        for (int i = 0; i < _extraCarets.Count; i++)
+                        bool isMultiCaret = _extraCarets.Count > 0;
+                        if (isMultiCaret)
                         {
-                            var ec = _extraCarets[i];
-                            var (el, ecCol) = GetNewCaretPosRight(ec.Line, ec.Col);
-                            long start = Document.GetLineStart(el);
-                            _extraCarets[i] = new ExtraCaret { Line = el, Col = ecCol, AbsoluteOffset = (int)start + ecCol };
+                            for (int i = 0; i < _extraCarets.Count; i++)
+                            {
+                                var extra = _extraCarets[i];
+                                var (nl, nc) = GetNewCaretPosRight(extra.Line, extra.Col, preventWrap: true);
+                                long start = Document.GetLineStart(nl);
+                                _extraCarets[i] = new ExtraCaret
+                                {
+                                    Line = nl,
+                                    Col = nc,
+                                    AbsoluteOffset = (int)start + nc
+                                };
+                            }
                         }
-                        DeduplicateCarets();
+                        var (newLine, newCol) = GetNewCaretPosRight(CaretLine, CaretCol, preventWrap: isMultiCaret);
+                        MoveCaret(newLine, newCol);
+                        DeduplicateExtraCarets();
                         e.Handled = true;
                     }
                     break;
 
                 case Key.Back:
                     {
-                        var offsets = GetCaretOffsetsDescending();
-                        foreach (var offset in offsets)
+                        if (_extraCarets.Count > 0)
                         {
+                            var editsList = new System.Collections.Generic.List<TextEdit>();
+                            LogHelper.Log($"[TextEditorCanvas] OnKeyDown Key.Back: generating batch edits for {_extraCarets.Count + 1} carets");
+                            int mainOffset = GetCaretAbsoluteOffset();
+                            if (mainOffset > 0)
+                            {
+                                editsList.Add(new TextEdit { Offset = mainOffset - 1, DeleteLength = 1, Text = "" });
+                            }
+                            foreach (var extra in _extraCarets)
+                            {
+                                if (extra.AbsoluteOffset > 0)
+                                {
+                                    editsList.Add(new TextEdit { Offset = extra.AbsoluteOffset - 1, DeleteLength = 1, Text = "" });
+                                }
+                            }
+                            if (editsList.Count > 0)
+                            {
+                                LogHelper.Log($"[TextEditorCanvas] OnKeyDown Key.Back: Invoking BatchEditReceived with {editsList.Count} edits");
+                                BatchEditReceived?.Invoke(editsList.ToArray());
+                            }
+                        }
+                        else
+                        {
+                            int offset = GetCaretAbsoluteOffset();
                             if (offset > 0)
                             {
                                 TextDeleteReceived?.Invoke(offset - 1, 1);
@@ -931,9 +1179,31 @@ namespace SpanCoder.Shell
 
                 case Key.Delete:
                     {
-                        var offsets = GetCaretOffsetsDescending();
-                        foreach (var offset in offsets)
+                        if (_extraCarets.Count > 0)
                         {
+                            var editsList = new System.Collections.Generic.List<TextEdit>();
+                            LogHelper.Log($"[TextEditorCanvas] OnKeyDown Key.Delete: generating batch edits for {_extraCarets.Count + 1} carets");
+                            int mainOffset = GetCaretAbsoluteOffset();
+                            if (mainOffset < Document.Length)
+                            {
+                                editsList.Add(new TextEdit { Offset = mainOffset, DeleteLength = 1, Text = "" });
+                            }
+                            foreach (var extra in _extraCarets)
+                            {
+                                if (extra.AbsoluteOffset < Document.Length)
+                                {
+                                    editsList.Add(new TextEdit { Offset = extra.AbsoluteOffset, DeleteLength = 1, Text = "" });
+                                }
+                            }
+                            if (editsList.Count > 0)
+                            {
+                                LogHelper.Log($"[TextEditorCanvas] OnKeyDown Key.Delete: Invoking BatchEditReceived with {editsList.Count} edits");
+                                BatchEditReceived?.Invoke(editsList.ToArray());
+                            }
+                        }
+                        else
+                        {
+                            int offset = GetCaretAbsoluteOffset();
                             if (offset < Document.Length)
                             {
                                 TextDeleteReceived?.Invoke(offset, 1);
@@ -945,9 +1215,22 @@ namespace SpanCoder.Shell
 
                 case Key.Enter:
                     {
-                        var offsets = GetCaretOffsetsDescending();
-                        foreach (var offset in offsets)
+                        if (_extraCarets.Count > 0)
                         {
+                            var editsList = new System.Collections.Generic.List<TextEdit>();
+                            LogHelper.Log($"[TextEditorCanvas] OnKeyDown Key.Enter: generating batch edits for {_extraCarets.Count + 1} carets");
+                            int mainOffset = GetCaretAbsoluteOffset();
+                            editsList.Add(new TextEdit { Offset = mainOffset, DeleteLength = 0, Text = "\n" });
+                            foreach (var extra in _extraCarets)
+                            {
+                                editsList.Add(new TextEdit { Offset = extra.AbsoluteOffset, DeleteLength = 0, Text = "\n" });
+                            }
+                            LogHelper.Log($"[TextEditorCanvas] OnKeyDown Key.Enter: Invoking BatchEditReceived with {editsList.Count} edits");
+                            BatchEditReceived?.Invoke(editsList.ToArray());
+                        }
+                        else
+                        {
+                            int offset = GetCaretAbsoluteOffset();
                             TextInputReceived?.Invoke(offset, "\n");
                         }
                         e.Handled = true;
@@ -962,15 +1245,48 @@ namespace SpanCoder.Shell
             }
         }
 
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            LogHelper.Log($"[TextEditorCanvas] OnKeyUp: key={e.Key}, modifiers={e.KeyModifiers}");
+            if (e.Key == Key.LeftAlt || e.Key == Key.RightAlt)
+            {
+                LogHelper.Log($"[TextEditorCanvas] Handling Alt key in OnKeyUp to prevent menu focus steal");
+                e.Handled = true;
+                return;
+            }
+            base.OnKeyUp(e);
+        }
+
+        protected override void OnLostFocus(Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            base.OnLostFocus(e);
+            var focused = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement();
+            LogHelper.Log($"[TextEditorCanvas] LostFocus! FocusedElement is now: {focused?.GetType().Name} (HashCode: {focused?.GetHashCode()})");
+        }
+
         protected override void OnTextInput(TextInputEventArgs e)
         {
             base.OnTextInput(e);
+            LogHelper.Log($"[TextEditorCanvas] OnTextInput: text='{e.Text}', mainCaretOffset={GetCaretAbsoluteOffset()}, extraCaretsCount={_extraCarets.Count}");
             if (Document == null || string.IsNullOrEmpty(e.Text) || e.Text == "\r" || e.Text == "\n")
                 return;
 
-            var offsets = GetCaretOffsetsDescending();
-            foreach (var offset in offsets)
+            if (_extraCarets.Count > 0)
             {
+                var editsList = new System.Collections.Generic.List<TextEdit>();
+                int mainOffset = GetCaretAbsoluteOffset();
+                editsList.Add(new TextEdit { Offset = mainOffset, DeleteLength = 0, Text = e.Text });
+                foreach (var extra in _extraCarets)
+                {
+                    editsList.Add(new TextEdit { Offset = extra.AbsoluteOffset, DeleteLength = 0, Text = e.Text });
+                }
+                LogHelper.Log($"[TextEditorCanvas] OnTextInput: Invoking BatchEditReceived with {editsList.Count} edits");
+                BatchEditReceived?.Invoke(editsList.ToArray());
+            }
+            else
+            {
+                int offset = GetCaretAbsoluteOffset();
+                LogHelper.Log($"[TextEditorCanvas] OnTextInput: Invoking TextInputReceived with offset={offset}, text='{e.Text}'");
                 TextInputReceived?.Invoke(offset, e.Text);
             }
             e.Handled = true;
@@ -1003,6 +1319,33 @@ namespace SpanCoder.Shell
                 int dragOffset = GetOffsetFromPointer(_lastMousePos);
                 MoveCaretToOffset(dragOffset);
                 _selectionEndOffset = dragOffset;
+                InvalidateVisual();
+            }
+            else if (_isBlockDragging)
+            {
+                var (currentLine, currentCol) = GetLineColFromPointer(_lastMousePos);
+                LogHelper.Log($"[TextEditorCanvas] OnPointerMoved block dragging: startLine={_blockDragStartLine}, currentLine={currentLine}, currentCol={currentCol}");
+                _extraCarets.Clear();
+                int start = Math.Min(_blockDragStartLine, currentLine);
+                int end = Math.Max(_blockDragStartLine, currentLine);
+                
+                for (int line = start; line <= end; line++)
+                {
+                    if (line == currentLine)
+                        continue;
+                    
+                    var (_, extraCol) = ClampToPrintable(line, currentCol);
+                    long lineStart = Document.GetLineStart(line);
+                    _extraCarets.Add(new ExtraCaret
+                    {
+                        Line = line,
+                        Col = extraCol,
+                        AbsoluteOffset = (int)lineStart + extraCol
+                    });
+                }
+                
+                MoveCaret(currentLine, currentCol);
+                LogHelper.Log($"[TextEditorCanvas] OnPointerMoved block dragging: CaretLine={CaretLine}, CaretCol={CaretCol}, extraCaretsCount={_extraCarets.Count}");
                 InvalidateVisual();
             }
         }
@@ -1049,19 +1392,21 @@ namespace SpanCoder.Shell
             double height = Bounds.Height;
 
             int lineCount = doc!.GetLineCount();
+            int visibleLineCount = _visibleLines.Count > 0 ? _visibleLines.Count : lineCount;
             double gutterWidth = GetGutterWidth();
 
             // Calculate visible line range
-            int startLine = (int)(ScrollY / LineHeight);
-            int endLine = (int)((ScrollY + height) / LineHeight) + 1;
+            int startVisibleIndex = (int)(ScrollY / LineHeight);
+            int endVisibleIndex = (int)((ScrollY + height) / LineHeight) + 1;
 
-            startLine = Math.Max(0, Math.Min(startLine, lineCount - 1));
-            endLine = Math.Max(0, Math.Min(endLine, lineCount - 1));
+            startVisibleIndex = Math.Max(0, Math.Min(startVisibleIndex, visibleLineCount - 1));
+            endVisibleIndex = Math.Max(0, Math.Min(endVisibleIndex, visibleLineCount - 1));
 
             // Render text
-            for (int i = startLine; i <= endLine; i++)
+            for (int v = startVisibleIndex; v <= endVisibleIndex; v++)
             {
-                double yOffset = (i * LineHeight) - ScrollY;
+                int i = _visibleLines.Count > 0 ? _visibleLines[v] : v;
+                double yOffset = (v * LineHeight) - ScrollY;
                 if (DebugActiveLine == i + 1)
                 {
                     context.FillRectangle(new SolidColorBrush(Color.FromArgb(40, 255, 255, 0)), new Rect(gutterWidth, yOffset, Bounds.Width - gutterWidth, LineHeight));
@@ -1146,7 +1491,7 @@ namespace SpanCoder.Shell
 
                         if (endX > startX)
                         {
-                            double y = (i * LineHeight) - ScrollY;
+                            double y = (v * LineHeight) - ScrollY;
                             context.FillRectangle(new SolidColorBrush(Color.Parse("#264F78")), new Rect(startX, y, endX - startX, LineHeight));
                         }
                     }
@@ -1195,7 +1540,7 @@ namespace SpanCoder.Shell
                             {
                                 double startX = gutterWidth + 10 + startCol * CharWidth - ScrollX;
                                 double endX = gutterWidth + 10 + endCol * CharWidth - ScrollX;
-                                double y = (i * LineHeight) - ScrollY + LineHeight - 2;
+                                double y = (v * LineHeight) - ScrollY + LineHeight - 2;
                                 IBrush brush = diag.Severity == 1 ? Brushes.Red : new SolidColorBrush(Color.Parse("#FFC800"));
                                 DrawSquiggle(context, startX, endX, y, brush);
                             }
@@ -1213,19 +1558,20 @@ namespace SpanCoder.Shell
             if (_caretVisible)
             {
                 var pen = new Pen(Brushes.LightGray, CaretThickness);
-                if (CaretLine >= startLine && CaretLine <= endLine)
+                int caretVisibleIndex = _docToVisualLine.Length > CaretLine ? _docToVisualLine[CaretLine] : CaretLine;
+                if (caretVisibleIndex >= startVisibleIndex && caretVisibleIndex <= endVisibleIndex)
                 {
                     double caretX = gutterWidth + 10 + (CaretCol * CharWidth) - ScrollX;
-                    double caretY = (CaretLine * LineHeight) - ScrollY;
+                    double caretY = (caretVisibleIndex * LineHeight) - ScrollY;
                     context.DrawLine(pen, new Point(caretX, caretY + 2), new Point(caretX, caretY + LineHeight - 2));
                 }
-
-                foreach (var ec in _extraCarets)
+                foreach (var extra in _extraCarets)
                 {
-                    if (ec.Line >= startLine && ec.Line <= endLine)
+                    int extraVisibleIndex = _docToVisualLine.Length > extra.Line ? _docToVisualLine[extra.Line] : extra.Line;
+                    if (extraVisibleIndex >= startVisibleIndex && extraVisibleIndex <= endVisibleIndex)
                     {
-                        double caretX = gutterWidth + 10 + (ec.Col * CharWidth) - ScrollX;
-                        double caretY = (ec.Line * LineHeight) - ScrollY;
+                        double caretX = gutterWidth + 10 + (extra.Col * CharWidth) - ScrollX;
+                        double caretY = (extraVisibleIndex * LineHeight) - ScrollY;
                         context.DrawLine(pen, new Point(caretX, caretY + 2), new Point(caretX, caretY + LineHeight - 2));
                     }
                 }
@@ -1241,9 +1587,10 @@ namespace SpanCoder.Shell
                 context.DrawLine(new Pen(new SolidColorBrush(Color.Parse("#2D2D2D")), 1.0), new Point(gutterWidth, 0), new Point(gutterWidth, Bounds.Height));
 
                 // Render line numbers inside gutter
-                for (int i = startLine; i <= endLine; i++)
+                for (int v = startVisibleIndex; v <= endVisibleIndex; v++)
                 {
-                    double yOffset = (i * LineHeight) - ScrollY;
+                    int i = _visibleLines.Count > 0 ? _visibleLines[v] : v;
+                    double yOffset = (v * LineHeight) - ScrollY;
 
                     // Draw Git diff line indicator on the leftmost edge of the gutter
                     if (_gitLineChanges.TryGetValue(i + 1, out var gitStatus))
@@ -1292,6 +1639,22 @@ namespace SpanCoder.Shell
                         context.DrawGeometry(Brushes.Yellow, null, pg);
                     }
 
+                    // Draw Folding Toggle
+                    var range = _foldingRanges.FirstOrDefault(r => r.StartLine == i);
+                    if (range != null)
+                    {
+                        string toggleStr = range.IsFolded ? "▸" : "▾";
+                        var formattedToggle = new FormattedText(
+                            toggleStr,
+                            CultureInfo.InvariantCulture,
+                            FlowDirection.LeftToRight,
+                            _typeface,
+                            _fontSize - 1.0,
+                            new SolidColorBrush(Color.Parse("#858585"))
+                        );
+                        context.DrawText(formattedToggle, new Point(gutterWidth - 12.0, yOffset + 1));
+                    }
+
                     string lineNumStr = (i + 1).ToString();
                     var formattedNum = new FormattedText(
                         lineNumStr,
@@ -1301,7 +1664,7 @@ namespace SpanCoder.Shell
                         _fontSize - 1.0,
                         new SolidColorBrush(Color.Parse("#858585"))
                     );
-                    double xOffset = gutterWidth - 5.0 - formattedNum.Width;
+                    double xOffset = gutterWidth - 18.0 - formattedNum.Width;
                     context.DrawText(formattedNum, new Point(xOffset, yOffset + 1));
                 }
             }
@@ -1335,6 +1698,39 @@ namespace SpanCoder.Shell
                 }
                 InvalidateVisual();
             }
+            if (_isBlockDragging)
+            {
+                LogHelper.Log($"[TextEditorCanvas] OnPointerReleased: _isBlockDragging was true. Final extraCaretsCount={_extraCarets.Count}");
+                _isBlockDragging = false;
+                InvalidateVisual();
+            }
+        }
+
+        private (int Line, int Col) GetLineColFromPointer(Point pos)
+        {
+            if (Document == null) return (0, 0);
+            int lineCount = Document.GetLineCount();
+            
+            double targetY = pos.Y + ScrollY;
+            double targetX = pos.X + ScrollX;
+
+            int visibleLineIndex = (int)(targetY / LineHeight);
+            int lineIndex = 0;
+            if (_visibleLines.Count > 0)
+            {
+                visibleLineIndex = Math.Max(0, Math.Min(visibleLineIndex, _visibleLines.Count - 1));
+                lineIndex = _visibleLines[visibleLineIndex];
+            }
+            else
+            {
+                lineIndex = Math.Max(0, Math.Min(visibleLineIndex, lineCount - 1));
+            }
+
+            double gutterWidth = GetGutterWidth();
+            int colIndex = (int)Math.Round((targetX - gutterWidth - 10) / CharWidth);
+            colIndex = Math.Max(0, colIndex);
+
+            return ClampToPrintable(lineIndex, colIndex);
         }
 
         private int GetOffsetFromPointer(Point pos)
@@ -1345,8 +1741,17 @@ namespace SpanCoder.Shell
             double targetY = pos.Y + ScrollY;
             double targetX = pos.X + ScrollX;
 
-            int lineIndex = (int)(targetY / LineHeight);
-            lineIndex = Math.Max(0, Math.Min(lineIndex, lineCount - 1));
+            int visibleLineIndex = (int)(targetY / LineHeight);
+            int lineIndex = 0;
+            if (_visibleLines.Count > 0)
+            {
+                visibleLineIndex = Math.Max(0, Math.Min(visibleLineIndex, _visibleLines.Count - 1));
+                lineIndex = _visibleLines[visibleLineIndex];
+            }
+            else
+            {
+                lineIndex = Math.Max(0, Math.Min(visibleLineIndex, lineCount - 1));
+            }
 
             double gutterWidth = GetGutterWidth();
             int colIndex = (int)Math.Round((targetX - gutterWidth - 10) / CharWidth);
@@ -1443,6 +1848,86 @@ namespace SpanCoder.Shell
             }
 
             return sb.ToString();
+        }
+
+        public void AdjustCaretsForBatch(TextEdit[] edits)
+        {
+            _selectionStartOffset = -1;
+            _selectionEndOffset = -1;
+            if (Document == null) return;
+            LogHelper.Log($"[TextEditorCanvas] AdjustCaretsForBatch: editsCount={edits.Length}");
+            foreach (var edit in edits)
+            {
+                LogHelper.Log($"[TextEditorCanvas] AdjustCaretsForBatch edit: offset={edit.Offset}, deleteLen={edit.DeleteLength}, text='{edit.Text}'");
+            }
+            UpdateLineStates(0);
+            RecomputeFoldingRanges();
+            UpdateFoldingLayout();
+
+            int mainOffset = GetCaretAbsoluteOffset();
+            LogHelper.Log($"[TextEditorCanvas] AdjustCaretsForBatch: beforeMainOffset={mainOffset}, extraCaretsCount={_extraCarets.Count}");
+            mainOffset = AdjustOffset(mainOffset, edits);
+            MoveCaretToOffset(mainOffset);
+
+            for (int i = 0; i < _extraCarets.Count; i++)
+            {
+                var extra = _extraCarets[i];
+                int newOffset = AdjustOffset(extra.AbsoluteOffset, edits);
+                var (l, c) = GetLineColFromOffset(newOffset);
+                _extraCarets[i] = new ExtraCaret
+                {
+                    Line = l,
+                    Col = c,
+                    AbsoluteOffset = newOffset
+                };
+            }
+            LogHelper.Log($"[TextEditorCanvas] AdjustCaretsForBatch: afterMainOffset={GetCaretAbsoluteOffset()}, extraCaretsCount={_extraCarets.Count}");
+
+            InvalidateVisual();
+        }
+
+        private int AdjustOffset(int originalOffset, TextEdit[] edits)
+        {
+            int offset = originalOffset;
+            foreach (var edit in edits)
+            {
+                if (!string.IsNullOrEmpty(edit.Text))
+                {
+                    if (edit.Offset <= originalOffset)
+                    {
+                        offset += edit.Text.Length;
+                    }
+                }
+                if (edit.DeleteLength > 0)
+                {
+                    if (edit.Offset < originalOffset)
+                    {
+                        int shift = Math.Min(originalOffset - edit.Offset, edit.DeleteLength);
+                        offset -= shift;
+                    }
+                }
+            }
+            return offset;
+        }
+
+        private void DeduplicateExtraCarets()
+        {
+            if (_extraCarets.Count == 0) return;
+
+            var seenLines = new System.Collections.Generic.HashSet<int> { CaretLine };
+            var uniqueCarets = new System.Collections.Generic.List<ExtraCaret>();
+
+            foreach (var extra in _extraCarets)
+            {
+                if (!seenLines.Contains(extra.Line))
+                {
+                    seenLines.Add(extra.Line);
+                    uniqueCarets.Add(extra);
+                }
+            }
+
+            _extraCarets.Clear();
+            _extraCarets.AddRange(uniqueCarets);
         }
     }
 }

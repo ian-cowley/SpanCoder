@@ -22,3 +22,8 @@ nuget-local/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+## Log Files
+*.log
+spancoder.log
+

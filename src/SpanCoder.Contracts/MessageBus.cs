@@ -39,6 +39,10 @@ namespace SpanCoder.Contracts
         public const byte AiChatResponse = 32;
         public const byte AiToolExecutionEvent = 33;
         public const byte AiStopCommand = 34;
+        public const byte FoldingRangeRequest = 35;
+        public const byte FoldingRangeResponse = 36;
+        public const byte BatchEditRequest = 37;
+        public const byte BatchEditResponse = 38;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -91,6 +95,19 @@ namespace SpanCoder.Contracts
             Label = label;
             Tooltip = tooltip;
         }
+    }
+
+    public struct FoldingRangeItem
+    {
+        public int StartLine;
+        public int EndLine;
+    }
+
+    public struct TextEdit
+    {
+        public int Offset;
+        public int DeleteLength;
+        public string Text;
     }
 
     public static class BinaryMessageSerializer
@@ -1259,6 +1276,68 @@ namespace SpanCoder.Contracts
             return new string(MemoryMarshal.Cast<byte, char>(payloadBytes));
         }
 
+        public static int WriteFoldingRangeRequest(Span<byte> buffer, int documentId)
+        {
+            int totalLength = HeaderSize;
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.FoldingRangeRequest, totalLength, documentId, 0);
+            return totalLength;
+        }
+
+        public static int WriteFoldingRangeResponse(Span<byte> buffer, int documentId, ReadOnlySpan<FoldingRangeItem> items)
+        {
+            int bodyLength = sizeof(int) + items.Length * sizeof(int) * 2;
+            int totalLength = HeaderSize + bodyLength;
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.FoldingRangeResponse, totalLength, documentId, 0);
+            int writeOffset = HeaderSize;
+
+            int count = items.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in count);
+            writeOffset += sizeof(int);
+
+            for (int i = 0; i < count; i++)
+            {
+                int start = items[i].StartLine;
+                MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in start);
+                writeOffset += sizeof(int);
+
+                int end = items[i].EndLine;
+                MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in end);
+                writeOffset += sizeof(int);
+            }
+
+            return totalLength;
+        }
+
+        public static System.Collections.Generic.List<FoldingRangeItem> ParseFoldingRangeResponse(ReadOnlySpan<byte> messageBuffer, out int documentId)
+        {
+            var header = MemoryMarshal.Read<MessageHeader>(messageBuffer.Slice(0, HeaderSize));
+            documentId = header.DocumentId;
+
+            int readOffset = HeaderSize;
+            int count = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+
+            var items = new System.Collections.Generic.List<FoldingRangeItem>(count);
+            for (int i = 0; i < count; i++)
+            {
+                int start = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+                readOffset += sizeof(int);
+
+                int end = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+                readOffset += sizeof(int);
+
+                items.Add(new FoldingRangeItem { StartLine = start, EndLine = end });
+            }
+
+            return items;
+        }
+
         public static int WriteAiStopCommand(Span<byte> buffer)
         {
             int totalLength = HeaderSize;
@@ -1267,6 +1346,180 @@ namespace SpanCoder.Contracts
 
             WriteHeader(buffer, MessageTypes.AiStopCommand, totalLength, 0, 0);
             return totalLength;
+        }
+
+        public static int WriteBatchEditRequest(Span<byte> buffer, int documentId, TextEdit[] edits)
+        {
+            int textEditsBytes = 0;
+            foreach (var edit in edits)
+            {
+                textEditsBytes += sizeof(int) * 3;
+                if (edit.Text != null)
+                {
+                    textEditsBytes += edit.Text.Length * sizeof(char);
+                }
+            }
+            int totalLength = HeaderSize + sizeof(int) + textEditsBytes;
+
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.BatchEditRequest, totalLength, documentId, 0);
+
+            int editsCount = edits.Length;
+            MemoryMarshal.Write(buffer.Slice(HeaderSize, sizeof(int)), in editsCount);
+
+            int currentOffset = HeaderSize + sizeof(int);
+            foreach (var edit in edits)
+            {
+                int offset = edit.Offset;
+                int delLen = edit.DeleteLength;
+                int textLen = edit.Text?.Length ?? 0;
+
+                MemoryMarshal.Write(buffer.Slice(currentOffset, sizeof(int)), in offset);
+                currentOffset += sizeof(int);
+
+                MemoryMarshal.Write(buffer.Slice(currentOffset, sizeof(int)), in delLen);
+                currentOffset += sizeof(int);
+
+                MemoryMarshal.Write(buffer.Slice(currentOffset, sizeof(int)), in textLen);
+                currentOffset += sizeof(int);
+
+                if (textLen > 0)
+                {
+                    ReadOnlySpan<byte> textSpanBytes = MemoryMarshal.AsBytes(edit.Text.AsSpan());
+                    textSpanBytes.CopyTo(buffer.Slice(currentOffset, textLen * sizeof(char)));
+                    currentOffset += textLen * sizeof(char);
+                }
+            }
+
+            return totalLength;
+        }
+
+        public static TextEdit[] ParseBatchEditRequest(ReadOnlySpan<byte> messageBuffer, out int documentId)
+        {
+            var header = MemoryMarshal.Read<MessageHeader>(messageBuffer.Slice(0, HeaderSize));
+            documentId = header.DocumentId;
+
+            int editsCount = MemoryMarshal.Read<int>(messageBuffer.Slice(HeaderSize, sizeof(int)));
+            var edits = new TextEdit[editsCount];
+
+            int currentOffset = HeaderSize + sizeof(int);
+            for (int i = 0; i < editsCount; i++)
+            {
+                int offset = MemoryMarshal.Read<int>(messageBuffer.Slice(currentOffset, sizeof(int)));
+                currentOffset += sizeof(int);
+
+                int delLen = MemoryMarshal.Read<int>(messageBuffer.Slice(currentOffset, sizeof(int)));
+                currentOffset += sizeof(int);
+
+                int textLen = MemoryMarshal.Read<int>(messageBuffer.Slice(currentOffset, sizeof(int)));
+                currentOffset += sizeof(int);
+
+                string text = "";
+                if (textLen > 0)
+                {
+                    ReadOnlySpan<byte> textBytes = messageBuffer.Slice(currentOffset, textLen * sizeof(char));
+                    text = new string(MemoryMarshal.Cast<byte, char>(textBytes));
+                    currentOffset += textLen * sizeof(char);
+                }
+
+                edits[i] = new TextEdit
+                {
+                    Offset = offset,
+                    DeleteLength = delLen,
+                    Text = text
+                };
+            }
+
+            return edits;
+        }
+
+        public static int WriteBatchEditResponse(Span<byte> buffer, int documentId, TextEdit[] edits)
+        {
+            int textEditsBytes = 0;
+            foreach (var edit in edits)
+            {
+                textEditsBytes += sizeof(int) * 3;
+                if (edit.Text != null)
+                {
+                    textEditsBytes += edit.Text.Length * sizeof(char);
+                }
+            }
+            int totalLength = HeaderSize + sizeof(int) + textEditsBytes;
+
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.BatchEditResponse, totalLength, documentId, 0);
+
+            int editsCount = edits.Length;
+            MemoryMarshal.Write(buffer.Slice(HeaderSize, sizeof(int)), in editsCount);
+
+            int currentOffset = HeaderSize + sizeof(int);
+            foreach (var edit in edits)
+            {
+                int offset = edit.Offset;
+                int delLen = edit.DeleteLength;
+                int textLen = edit.Text?.Length ?? 0;
+
+                MemoryMarshal.Write(buffer.Slice(currentOffset, sizeof(int)), in offset);
+                currentOffset += sizeof(int);
+
+                MemoryMarshal.Write(buffer.Slice(currentOffset, sizeof(int)), in delLen);
+                currentOffset += sizeof(int);
+
+                MemoryMarshal.Write(buffer.Slice(currentOffset, sizeof(int)), in textLen);
+                currentOffset += sizeof(int);
+
+                if (textLen > 0)
+                {
+                    ReadOnlySpan<byte> textSpanBytes = MemoryMarshal.AsBytes(edit.Text.AsSpan());
+                    textSpanBytes.CopyTo(buffer.Slice(currentOffset, textLen * sizeof(char)));
+                    currentOffset += textLen * sizeof(char);
+                }
+            }
+
+            return totalLength;
+        }
+
+        public static TextEdit[] ParseBatchEditResponse(ReadOnlySpan<byte> messageBuffer, out int documentId)
+        {
+            var header = MemoryMarshal.Read<MessageHeader>(messageBuffer.Slice(0, HeaderSize));
+            documentId = header.DocumentId;
+
+            int editsCount = MemoryMarshal.Read<int>(messageBuffer.Slice(HeaderSize, sizeof(int)));
+            var edits = new TextEdit[editsCount];
+
+            int currentOffset = HeaderSize + sizeof(int);
+            for (int i = 0; i < editsCount; i++)
+            {
+                int offset = MemoryMarshal.Read<int>(messageBuffer.Slice(currentOffset, sizeof(int)));
+                currentOffset += sizeof(int);
+
+                int delLen = MemoryMarshal.Read<int>(messageBuffer.Slice(currentOffset, sizeof(int)));
+                currentOffset += sizeof(int);
+
+                int textLen = MemoryMarshal.Read<int>(messageBuffer.Slice(currentOffset, sizeof(int)));
+                currentOffset += sizeof(int);
+
+                string text = "";
+                if (textLen > 0)
+                {
+                    ReadOnlySpan<byte> textBytes = messageBuffer.Slice(currentOffset, textLen * sizeof(char));
+                    text = new string(MemoryMarshal.Cast<byte, char>(textBytes));
+                    currentOffset += textLen * sizeof(char);
+                }
+
+                edits[i] = new TextEdit
+                {
+                    Offset = offset,
+                    DeleteLength = delLen,
+                    Text = text
+                };
+            }
+
+            return edits;
         }
     }
 }

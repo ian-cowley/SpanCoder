@@ -91,6 +91,33 @@ namespace SpanCoder.Shell
             Width = 900;
             Height = 600;
             Background = Brushes.Black;
+
+            // Intercept Alt key down/up to defend TextEditorCanvas focus from menu mnemonics activation
+            AddHandler(InputElement.KeyDownEvent, (s, e) =>
+            {
+                if (e.Key == Key.LeftAlt || e.Key == Key.RightAlt)
+                {
+                    var focused = FocusManager?.GetFocusedElement();
+                    if (focused is TextEditorCanvas)
+                    {
+                        LogHelper.Log("[ShellWindow] Tunneling KeyDown: Intercepted Alt key on TextEditorCanvas, marking Handled=true");
+                        e.Handled = true;
+                    }
+                }
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+            AddHandler(InputElement.KeyUpEvent, (s, e) =>
+            {
+                if (e.Key == Key.LeftAlt || e.Key == Key.RightAlt)
+                {
+                    var focused = FocusManager?.GetFocusedElement();
+                    if (focused is TextEditorCanvas)
+                    {
+                        LogHelper.Log("[ShellWindow] Tunneling KeyUp: Intercepted Alt key on TextEditorCanvas, marking Handled=true");
+                        e.Handled = true;
+                    }
+                }
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         }
 
         public ShellWindow(System.Diagnostics.Stopwatch startupStopwatch) : this()
@@ -683,6 +710,7 @@ namespace SpanCoder.Shell
             var initialPane = new EditorPane(this);
             _editorPanes.Add(initialPane);
             _activePane = initialPane;
+            initialPane.Border.BorderBrush = new SolidColorBrush(Color.Parse("#007ACC"));
 
             _editorSplitContainer.Children.Add(initialPane);
             Grid.SetRow(initialPane, 0);
@@ -1242,6 +1270,7 @@ namespace SpanCoder.Shell
             {
                 if (BinaryMessageSerializer.TryParseHeader(payload, out var header))
                 {
+                    LogHelper.Log($"[ShellWindow] OnEngineMessage received: Type={header.Type}, DocumentId={header.DocumentId}, Length={header.Length}");
                     if (header.Type == MessageTypes.DocumentChanged)
                     {
                         BinaryMessageSerializer.ParseDocumentChanged(payload, out int docId, out int offset, out int addedLength, out int deletedLength);
@@ -1275,6 +1304,7 @@ namespace SpanCoder.Shell
                                     
                                     RebuildTabsUI(_activePane);
                                     _activePane.UpdateScrollbars();
+                                    RequestLspFoldingRanges(docId);
                                 }
                                 else
                                 {
@@ -1300,6 +1330,7 @@ namespace SpanCoder.Shell
 
                                 UpdateStatusBar();
                                 UpdateInlayHintsAndCodeLens();
+                                RequestLspFoldingRanges(docId);
                             }
                         }
                     }
@@ -1309,6 +1340,20 @@ namespace SpanCoder.Shell
                         if (_canvas.Document != null && _canvas.Document.Id == docId)
                         {
                             _canvas.SetDiagnostics(items);
+                        }
+                    }
+                    else if (header.Type == MessageTypes.FoldingRangeResponse)
+                    {
+                        var items = BinaryMessageSerializer.ParseFoldingRangeResponse(payload, out int docId);
+                        var panesWithDoc = _editorPanes.Where(p => p.OpenDocuments.Any(d => d.Id == docId)).ToList();
+                        foreach (var pane in panesWithDoc)
+                        {
+                            var paneDoc = pane.OpenDocuments.First(d => d.Id == docId);
+                            if (pane.ActiveDocument == paneDoc)
+                            {
+                                pane.Canvas.SetFoldingRangesFromLsp(items.ToArray());
+                                pane.UpdateScrollbars();
+                            }
                         }
                     }
                     else if (header.Type == MessageTypes.AutocompleteResponse)
@@ -1386,6 +1431,42 @@ namespace SpanCoder.Shell
                     {
                         string json = BinaryMessageSerializer.ParseStringPayload(payload);
                         _aiChatPanel.HandleToolExecutionEvent(json);
+                    }
+                    else if (header.Type == MessageTypes.BatchEditResponse)
+                    {
+                        var edits = BinaryMessageSerializer.ParseBatchEditResponse(payload, out int docId);
+                        LogHelper.Log($"[ShellWindow] OnEngineMessage BatchEditResponse: docId={docId}, editsCount={edits.Length}");
+                        if (_engine != null)
+                        {
+                            var doc = _engine.GetDocument(docId);
+                            LogHelper.Log($"[ShellWindow] OnEngineMessage BatchEditResponse: doc retrieved={doc != null}, docLength={doc?.Length}");
+                            if (doc != null)
+                            {
+                                var panesWithDoc = _editorPanes.Where(p => p.OpenDocuments.Any(d => d.Id == docId)).ToList();
+                                LogHelper.Log($"[ShellWindow] OnEngineMessage BatchEditResponse: panesWithDocCount={panesWithDoc.Count}");
+                                foreach (var pane in panesWithDoc)
+                                {
+                                    var paneDoc = pane.OpenDocuments.First(d => d.Id == docId);
+                                    paneDoc.Document = doc;
+                                    
+                                    if (pane.ActiveDocument == paneDoc)
+                                    {
+                                        pane.Canvas.Document = doc;
+                                        pane.Canvas.InvalidateVisual();
+                                        pane.UpdateScrollbars();
+                                        
+                                        if (pane == _activePane)
+                                        {
+                                            LogHelper.Log($"[ShellWindow] OnEngineMessage BatchEditResponse: Calling AdjustCaretsForBatch on active pane canvas");
+                                            pane.Canvas.AdjustCaretsForBatch(edits);
+                                        }
+                                    }
+                                }
+                                UpdateStatusBar();
+                                UpdateInlayHintsAndCodeLens();
+                                RequestLspFoldingRanges(docId);
+                            }
+                        }
                     }
                 }
             });
@@ -2071,6 +2152,27 @@ namespace SpanCoder.Shell
                 _engine.Send(buffer);
             };
 
+            canvas.BatchEditReceived += (edits) =>
+            {
+                LogHelper.Log($"[ShellWindow] canvas.BatchEditReceived: editsCount={edits.Length}");
+                if (canvas.Document == null || _engine == null) return;
+                int textEditsBytes = 0;
+                foreach (var edit in edits)
+                {
+                    textEditsBytes += sizeof(int) * 3;
+                    if (edit.Text != null)
+                    {
+                        textEditsBytes += edit.Text.Length * sizeof(char);
+                    }
+                }
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + textEditsBytes];
+                int len = BinaryMessageSerializer.WriteBatchEditRequest(buffer, canvas.Document.Id, edits);
+                byte[] finalBuffer = new byte[len];
+                Array.Copy(buffer, 0, finalBuffer, 0, len);
+                LogHelper.Log($"[ShellWindow] canvas.BatchEditReceived: Sending BatchEditRequest ({finalBuffer.Length} bytes) to engine");
+                _engine.Send(finalBuffer);
+            };
+
             canvas.CaretMoved += UpdateStatusBar;
 
             canvas.AutocompleteRequested += (offset) =>
@@ -2429,13 +2531,10 @@ namespace SpanCoder.Shell
                     }
                     else
                     {
-                        var offsets = _canvas.GetCaretOffsetsDescending();
-                        foreach (var offset in offsets)
-                        {
-                            byte[] insBuf = new byte[BinaryMessageSerializer.HeaderSize + 4 + text.Length * 2];
-                            BinaryMessageSerializer.WriteInsertText(insBuf, _canvas.Document.Id, offset, text);
-                            _engine.Send(insBuf);
-                        }
+                        int offset = _canvas.GetCaretAbsoluteOffset();
+                        byte[] insBuf = new byte[BinaryMessageSerializer.HeaderSize + 4 + text.Length * 2];
+                        BinaryMessageSerializer.WriteInsertText(insBuf, _canvas.Document.Id, offset, text);
+                        _engine.Send(insBuf);
                     }
                 }
             }
@@ -2679,6 +2778,175 @@ namespace SpanCoder.Shell
             }
         }
 
+        private bool _bypassClosingCheck = false;
+
+        protected override void OnClosing(WindowClosingEventArgs e)
+        {
+            if (_bypassClosingCheck)
+            {
+                base.OnClosing(e);
+                return;
+            }
+
+            base.OnClosing(e);
+
+            Console.WriteLine("[Shell] Window closing. Cleaning up background processes...");
+
+            // 1. Dispose Terminal/PTY
+            try
+            {
+                _terminalPty?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Shell] Error disposing PTY: {ex.Message}");
+            }
+
+            // 2. Stop all mock extensions
+            foreach (var extId in _mockExtensionConnections.Keys.ToList())
+            {
+                try
+                {
+                    StopMockExtension(extId);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Shell] Error stopping mock extension {extId}: {ex.Message}");
+                }
+            }
+
+            // 3. Dispose the Engine Connection (which kills the subprocess)
+            if (_engine is IDisposable disposableEngine)
+            {
+                try
+                {
+                    disposableEngine.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Shell] Error disposing engine connection: {ex.Message}");
+                }
+            }
+
+            // 4. Force check for lingering processes spawned by this app or named SpanCoder.Engine / SpanCoder.App
+            var processesToClean = new List<System.Diagnostics.Process>();
+            try
+            {
+                var allProcesses = System.Diagnostics.Process.GetProcesses();
+                foreach (var p in allProcesses)
+                {
+                    try
+                    {
+                        string name = p.ProcessName;
+                        if (name.Equals("SpanCoder.Engine", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("SpanCoder.App", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (p.Id != System.Diagnostics.Process.GetCurrentProcess().Id)
+                            {
+                                processesToClean.Add(p);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Shell] Error listing processes: {ex.Message}");
+            }
+
+            if (processesToClean.Count > 0)
+            {
+                Console.WriteLine($"[Shell] Found {processesToClean.Count} lingering processes. Waiting for exit...");
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                
+                while (stopwatch.ElapsedMilliseconds < 1500 && processesToClean.Any(p => !p.HasExited))
+                {
+                    System.Threading.Thread.Sleep(100);
+                }
+
+                var lingering = processesToClean.Where(p => !p.HasExited).ToList();
+                if (lingering.Count > 0)
+                {
+                    Console.WriteLine($"[Shell] {lingering.Count} processes did not exit. Attempting to kill...");
+                    foreach (var p in lingering)
+                    {
+                        try
+                        {
+                            p.Kill();
+                        }
+                        catch (Exception killEx)
+                        {
+                            Console.WriteLine($"[Shell] Failed to kill PID {p.Id}: {killEx.Message}");
+                        }
+                    }
+
+                    System.Threading.Thread.Sleep(200);
+                    var stillLingering = lingering.Where(p => !p.HasExited).ToList();
+                    if (stillLingering.Count > 0)
+                    {
+                        e.Cancel = true;
+
+                        Window warningWindow = null!;
+
+                        var okButton = new Button
+                        {
+                            Content = "OK",
+                            HorizontalAlignment = HorizontalAlignment.Right,
+                            Width = 80
+                        };
+                        okButton.Click += (sender, args) => 
+                        {
+                            warningWindow?.Close();
+                        };
+
+                        var stackPanel = new StackPanel
+                        {
+                            Spacing = 15,
+                            Margin = new Thickness(20)
+                        };
+                        stackPanel.Children.Add(new TextBlock
+                        {
+                            Text = "Warning: Lingering Background Processes Detected",
+                            FontWeight = FontWeight.Bold,
+                            Foreground = Brushes.Red,
+                            FontSize = 14
+                        });
+                        stackPanel.Children.Add(new TextBlock
+                        {
+                            Text = $"The following processes failed to terminate cleanly:\n" +
+                                   string.Join(", ", stillLingering.Select(p => $"PID {p.Id} ({p.ProcessName})")) +
+                                   "\n\nYou may need to terminate them manually via Task Manager.",
+                            Foreground = Brushes.LightGray,
+                            TextWrapping = TextWrapping.Wrap,
+                            FontSize = 12
+                        });
+                        stackPanel.Children.Add(okButton);
+
+                        warningWindow = new Window
+                        {
+                            Title = "Lingering Processes Warning",
+                            Width = 450,
+                            Height = 200,
+                            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                            CanResize = false,
+                            Background = new SolidColorBrush(Color.Parse("#1E1E1E")),
+                            Content = stackPanel
+                        };
+                        
+                        warningWindow.ShowDialog(this).ContinueWith(t => 
+                        {
+                            Dispatcher.UIThread.Post(() => 
+                            {
+                                _bypassClosingCheck = true;
+                                Close();
+                            });
+                        });
+                    }
+                }
+            }
+        }
+
         public class OpenDocument
         {
             public int Id { get; }
@@ -2704,6 +2972,16 @@ namespace SpanCoder.Shell
             public string Description { get; set; } = "";
             public string ManifestJson { get; set; } = "";
             public bool IsInstalled { get; set; }
+        }
+
+        private void RequestLspFoldingRanges(int docId)
+        {
+            if (_engine == null) return;
+            byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
+            int len = BinaryMessageSerializer.WriteFoldingRangeRequest(buffer, docId);
+            byte[] finalBuffer = new byte[len];
+            Array.Copy(buffer, 0, finalBuffer, 0, len);
+            _engine.Send(finalBuffer);
         }
 
         private void UpdateInlayHintsAndCodeLens()

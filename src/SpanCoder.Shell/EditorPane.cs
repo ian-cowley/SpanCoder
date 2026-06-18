@@ -89,6 +89,7 @@ namespace SpanCoder.Shell
             EditorGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Scrollbar H
 
             Canvas = new TextEditorCanvas();
+            Canvas.LayoutChanged += UpdateScrollbars;
             EditorGrid.Children.Add(Canvas);
             Grid.SetRow(Canvas, 0);
             Grid.SetColumn(Canvas, 0);
@@ -199,7 +200,7 @@ namespace SpanCoder.Shell
                 return;
             }
 
-            int lineCount = Canvas.Document.GetLineCount();
+            int lineCount = Canvas.GetVisibleLineCount();
             double viewportHeight = Canvas.Bounds.Height;
             double totalHeight = lineCount * Canvas.LineHeight;
 

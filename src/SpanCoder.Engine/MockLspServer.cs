@@ -195,6 +195,12 @@ namespace SpanCoder.Engine
                         var symbolsJson = GetMockDocumentSymbols(uri, text);
                         SendResponse(stdout, id, symbolsJson);
                     }
+                    else if (method == "textDocument/foldingRange")
+                    {
+                        documents.TryGetValue(uri, out string? text);
+                        var foldingJson = GetMockFoldingRanges(uri, text);
+                        SendResponse(stdout, id, foldingJson);
+                    }
                 }
             }
         }
@@ -553,6 +559,38 @@ namespace SpanCoder.Engine
 
             sb.Append("]");
             return sb.ToString();
+        }
+
+        private static string GetMockFoldingRanges(string uri, string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return "[]";
+
+            var list = new System.Collections.Generic.List<string>();
+            var stack = new System.Collections.Generic.Stack<int>();
+            string[] lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string lineText = lines[i];
+                for (int j = 0; j < lineText.Length; j++)
+                {
+                    if (lineText[j] == '{')
+                    {
+                        stack.Push(i);
+                    }
+                    else if (lineText[j] == '}')
+                    {
+                        if (stack.Count > 0)
+                        {
+                            int start = stack.Pop();
+                            if (i > start)
+                            {
+                                list.Add($"{{\"startLine\":{start},\"endLine\":{i}}}");
+                            }
+                        }
+                    }
+                }
+            }
+            return "[" + string.Join(",", list) + "]";
         }
 
         private static void SendResponse(Stream stdout, int id, string resultJson)

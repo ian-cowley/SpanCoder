@@ -127,6 +127,13 @@ graph TD
 * **Focus Overlay Migration**: Automatically shifts overlays (such as autocompletions, code hovers, and debugging controls) to the active editor pane's visual tree.
 * **Compile-Time Command Routing**: Configured with compile-time source-generated shortcut keys (`Ctrl+E, H` to split horizontally, `Ctrl+E, V` to split vertically, and `Ctrl+E, U` to unsplit).
 
+### 18. Structural Code Folding
+* **Zero-Latency Scanner**: Real-time parser scans the document for `{` / `}` braces and `#region` / `#endregion` preprocessor blocks, automatically excluding comment and string tokens.
+* **LSP Integration**: Background tasks query the Language Server via `textDocument/foldingRange` to obtain richer semantic blocks.
+* **Line Mapping Engine**: Mappings translate document line indexes to visual lines. Hidden (folded) lines are collapsed, updating editor scrollbar metrics and gutter folding indicator icons (`▾` / `▸`) in real time.
+* **Interactive Gutter Toggles**: Click folding indicators directly in the gutter margin to expand or collapse blocks.
+* **Smart Caret Navigation**: caret position calculation and arrow key movements automatically jump over hidden (folded) lines.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions
@@ -352,11 +359,10 @@ Interactive debugging features are integrated into the main shell via several de
 * [ ] **Inline Ghost Text**: Support inline ghost-text code completions using zero-allocation overlay renderings.
 * [x] **AI Chat & Command Palette Actions**: Build a floating sidebar chat window and command palette shortcodes (e.g., `/explain`, `/refactor`, `/fix`) to interact directly with code snippets.
 
-### Phase 2: Advanced Editing Features & Multi-Caret Support
+### Phase 2: Advanced Editing Features
 * [x] **Split Editor Layouts**: Support vertical and horizontal workspace splitting to edit multiple files or different views of the same file concurrently.
-* [x] **Simultaneous Multi-Cursors**: Enable multi-caret inputs and selections with parallel state updates in the Piece Table.
 * [ ] **Vim Emulation Mode**: Implement a zero-dependency, out-of-process modal keyboard layout adapter.
-* [ ] **Structural Code Folding**: Add folding support for classes, methods, and blocks, using background AST parsers.
+* [x] **Structural Code Folding**: Add folding support for classes, methods, and blocks, using background AST parsers.
 
 ### Phase 3: Remote Development & Collaboration
 * [ ] **Remote Engine Host**: Allow `SpanCoder.App` to run locally while connecting to a remote `SpanCoder.Engine` daemon running on a Linux server or in a Docker DevContainer.

@@ -20,6 +20,10 @@ namespace SpanCoder.App
         private Process? _engineProcess;
         private readonly object _writeLock = new();
         private readonly CancellationTokenSource _cts = new();
+
+        private readonly string? _remoteHost;
+        private readonly int _remotePort;
+        private readonly RemotePathMapper _pathMapper = new(null);
         
         // Local Document Mirrors
         private readonly ConcurrentDictionary<int, Document> _documentMirrors = new();
@@ -44,6 +48,13 @@ namespace SpanCoder.App
         {
         }
 
+        public IpcEngineConnection(string? remoteHost, int remotePort, string? pathMapping)
+        {
+            _remoteHost = remoteHost;
+            _remotePort = remotePort;
+            _pathMapper = new RemotePathMapper(pathMapping);
+        }
+
         public void Start()
         {
             StartListenerAndSpawn();
@@ -52,6 +63,23 @@ namespace SpanCoder.App
 
         private void StartListenerAndSpawn()
         {
+            if (!string.IsNullOrEmpty(_remoteHost))
+            {
+                LogHelper.Log($"[IpcConnection] Connecting to remote engine at {_remoteHost}:{_remotePort}...");
+                _client = new TcpClient();
+                var connectTask = _client.ConnectAsync(_remoteHost, _remotePort);
+                if (connectTask.Wait(5000))
+                {
+                    _stream = _client.GetStream();
+                    LogHelper.Log("[IpcConnection] Connected to remote engine.");
+                }
+                else
+                {
+                    throw new TimeoutException($"Timeout connecting to remote engine at {_remoteHost}:{_remotePort}");
+                }
+                return;
+            }
+
             // 1. Bind listener to a dynamic free port
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
@@ -126,14 +154,38 @@ namespace SpanCoder.App
 
         public void Send(byte[] message)
         {
-            if (BinaryMessageSerializer.TryParseHeader(message, out var header))
-            {
-                LogHelper.Log($"[IpcConnection] Send: Type={header.Type}, DocumentId={header.DocumentId}, Length={header.Length}");
-            }
-            if (_stream == null) return;
+            if (!BinaryMessageSerializer.TryParseHeader(message, out var header)) return;
 
-            // Track outgoing edits for crash recovery
-            TrackOutgoingMessage(message);
+            LogHelper.Log($"[IpcConnection] Send: Type={header.Type}, DocumentId={header.DocumentId}, Length={header.Length}");
+
+            // Map paths for outgoing messages
+            if (header.Type == MessageTypes.LoadFile)
+            {
+                var localPath = BinaryMessageSerializer.ParseLoadFile(message).ToString();
+                var remotePath = _pathMapper.ToRemote(localPath);
+                
+                byte[] newBuffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + remotePath.Length * 2];
+                BinaryMessageSerializer.WriteLoadFile(newBuffer, remotePath);
+                message = newBuffer;
+
+                _pendingLoadFiles.Enqueue(localPath);
+                _pathToOldIdMap[localPath] = -1;
+            }
+            else if (header.Type == MessageTypes.DebugStartRequest)
+            {
+                var localPath = BinaryMessageSerializer.ParseDebugStartRequest(message, out int docId);
+                var remotePath = _pathMapper.ToRemote(localPath);
+
+                byte[] newBuffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + remotePath.Length * 2];
+                BinaryMessageSerializer.WriteDebugStartRequest(newBuffer, docId, remotePath);
+                message = newBuffer;
+            }
+            else if (header.Type == MessageTypes.InsertText || header.Type == MessageTypes.DeleteText || header.Type == MessageTypes.BatchEditRequest)
+            {
+                TrackOutgoingMessage(message);
+            }
+
+            if (_stream == null) return;
 
             try
             {
@@ -168,15 +220,7 @@ namespace SpanCoder.App
 
             if (!BinaryMessageSerializer.TryParseHeader(message, out var header)) return;
 
-            if (header.Type == MessageTypes.LoadFile)
-            {
-                var filePath = BinaryMessageSerializer.ParseLoadFile(message).ToString();
-                _pendingLoadFiles.Enqueue(filePath);
-                // We don't have the DocumentId yet. We will map the path to the ID once the response arrives.
-                // We temporarily store a pending state mapping
-                _pathToOldIdMap[filePath] = -1; 
-            }
-            else if (header.Type == MessageTypes.InsertText || header.Type == MessageTypes.DeleteText || header.Type == MessageTypes.BatchEditRequest)
+            if (header.Type == MessageTypes.InsertText || header.Type == MessageTypes.DeleteText || header.Type == MessageTypes.BatchEditRequest)
             {
                 int docId = header.DocumentId;
                 if (_trackedStates.TryGetValue(docId, out var state))
@@ -220,6 +264,9 @@ namespace SpanCoder.App
                     {
                         ReadExactly(_stream, fullMessage, headerBuffer.Length, messageLength - headerBuffer.Length);
                     }
+
+                    // Translate incoming message paths
+                    fullMessage = TranslateIncomingMessage(fullMessage);
 
                     // Process incoming message locally (mirroring)
                     ProcessIncomingMessage(fullMessage);
@@ -430,8 +477,9 @@ namespace SpanCoder.App
                 Console.WriteLine($"[IpcConnection] Replaying load for {state.FilePath}...");
                 
                 // Construct and send LoadFile message
-                byte[] loadBuffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + state.FilePath.Length * 2];
-                BinaryMessageSerializer.WriteLoadFile(loadBuffer, state.FilePath);
+                string remotePath = _pathMapper.ToRemote(state.FilePath);
+                byte[] loadBuffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + remotePath.Length * 2];
+                BinaryMessageSerializer.WriteLoadFile(loadBuffer, remotePath);
                 
                 // Send synchronously to let the engine respond and allocate the document ID
                 lock (_writeLock)
@@ -567,6 +615,65 @@ namespace SpanCoder.App
                 doc.Dispose();
             }
             _documentMirrors.Clear();
+        }
+
+        private byte[] TranslateIncomingMessage(byte[] message)
+        {
+            if (!BinaryMessageSerializer.TryParseHeader(message, out var header)) return message;
+
+            if (header.Type == MessageTypes.GotoDefinitionResponse)
+            {
+                var remotePath = BinaryMessageSerializer.ParseGotoDefinitionResponse(message, out int docId, out int offset, out int line, out int character);
+                var localPath = _pathMapper.ToLocal(remotePath);
+                
+                byte[] newBuffer = new byte[BinaryMessageSerializer.HeaderSize + 12 + localPath.Length * 2];
+                BinaryMessageSerializer.WriteGotoDefinitionResponse(newBuffer, docId, offset, localPath, line, character);
+                return newBuffer;
+            }
+            else if (header.Type == MessageTypes.FindReferencesResponse)
+            {
+                var items = BinaryMessageSerializer.ParseFindReferencesResponse(message, out int docId, out int offset);
+                var mappedItems = new List<ReferenceItem>();
+                foreach (var item in items)
+                {
+                    mappedItems.Add(new ReferenceItem
+                    {
+                        FilePath = _pathMapper.ToLocal(item.FilePath),
+                        Line = item.Line,
+                        Character = item.Character
+                    });
+                }
+                
+                int bodyLen = sizeof(int);
+                for (int i = 0; i < mappedItems.Count; i++)
+                {
+                    bodyLen += sizeof(int) + mappedItems[i].FilePath.Length * sizeof(char) + sizeof(int) + sizeof(int);
+                }
+                
+                byte[] newBuffer = new byte[BinaryMessageSerializer.HeaderSize + bodyLen];
+                BinaryMessageSerializer.WriteFindReferencesResponse(newBuffer, docId, offset, mappedItems.ToArray());
+                return newBuffer;
+            }
+            else if (header.Type == MessageTypes.DebugStateReport)
+            {
+                BinaryMessageSerializer.ParseDebugStateReport(message, out int docId, out var stackFrames, out var variables);
+                var mappedFrames = new List<string>();
+                foreach (var frame in stackFrames)
+                {
+                    mappedFrames.Add(_pathMapper.TranslateFrame(frame));
+                }
+                
+                int bodyLen = sizeof(int);
+                for (int i = 0; i < mappedFrames.Count; i++) bodyLen += sizeof(int) + mappedFrames[i].Length * sizeof(char);
+                bodyLen += sizeof(int);
+                for (int i = 0; i < variables.Count; i++) bodyLen += sizeof(int) + variables[i].Length * sizeof(char);
+                
+                byte[] newBuffer = new byte[BinaryMessageSerializer.HeaderSize + bodyLen];
+                BinaryMessageSerializer.WriteDebugStateReport(newBuffer, docId, mappedFrames, variables);
+                return newBuffer;
+            }
+
+            return message;
         }
     }
 }

@@ -43,6 +43,8 @@ namespace SpanCoder.Contracts
         public const byte FoldingRangeResponse = 36;
         public const byte BatchEditRequest = 37;
         public const byte BatchEditResponse = 38;
+        public const byte SaveFile = 39;
+        public const byte SaveFileResponse = 40;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -1520,6 +1522,26 @@ namespace SpanCoder.Contracts
             }
 
             return edits;
+        }
+
+        public static int WriteSaveFile(Span<byte> buffer, int documentId)
+        {
+            int totalLength = HeaderSize;
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.SaveFile, totalLength, documentId, 0);
+            return totalLength;
+        }
+
+        public static int WriteSaveFileResponse(Span<byte> buffer, int documentId)
+        {
+            int totalLength = HeaderSize;
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.SaveFileResponse, totalLength, documentId, 0);
+            return totalLength;
         }
     }
 }

@@ -25,9 +25,14 @@ namespace SpanCoder.Engine
             }
 
             int port = 0;
+            bool listen = false;
             for (int i = 0; i < args.Length; i++)
             {
-                if ((args[i] == "--port" || args[i] == "-p") && i + 1 < args.Length)
+                if (args[i] == "--listen" || args[i] == "-l")
+                {
+                    listen = true;
+                }
+                else if ((args[i] == "--port" || args[i] == "-p") && i + 1 < args.Length)
                 {
                     int.TryParse(args[i + 1], out port);
                 }
@@ -35,24 +40,51 @@ namespace SpanCoder.Engine
 
             if (port == 0)
             {
-                Console.WriteLine("Usage: SpanCoder.Engine --port <port>");
+                Console.WriteLine("Usage: SpanCoder.Engine --port <port> [--listen]");
                 return;
             }
 
-            Console.WriteLine($"[Engine] Connecting to host on port {port}...");
-            TcpClient client;
-            try
+            if (listen)
             {
-                client = new TcpClient();
-                client.Connect("127.0.0.1", port);
+                var listener = new TcpListener(System.Net.IPAddress.Any, port);
+                listener.Start();
+                Console.WriteLine($"[Engine] Listening for connections on port {port}...");
+                while (true)
+                {
+                    try
+                    {
+                        var client = listener.AcceptTcpClient();
+                        HandleClient(client);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Engine] Listener error: {ex.Message}");
+                        Thread.Sleep(1000);
+                    }
+                }
             }
-            catch (Exception ex)
+            else
             {
-                Console.WriteLine($"[Engine] Failed to connect: {ex.Message}");
-                return;
-            }
+                Console.WriteLine($"[Engine] Connecting to host on port {port}...");
+                TcpClient client;
+                try
+                {
+                    client = new TcpClient();
+                    client.Connect("127.0.0.1", port);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Engine] Failed to connect: {ex.Message}");
+                    return;
+                }
 
-            Console.WriteLine("[Engine] Connected. Starting message loop.");
+                HandleClient(client);
+            }
+        }
+
+        private static void HandleClient(TcpClient client)
+        {
+            Console.WriteLine("[Engine] Client connected. Starting message loop.");
             using var stream = client.GetStream();
             var engineHost = new EngineHost();
             object socketLock = new object();
@@ -116,7 +148,7 @@ namespace SpanCoder.Engine
             {
                 engineHost.Stop();
                 client.Close();
-                Console.WriteLine("[Engine] Shutdown completed.");
+                Console.WriteLine("[Engine] Client disconnected.");
             }
         }
 

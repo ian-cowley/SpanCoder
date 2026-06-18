@@ -302,6 +302,33 @@ namespace SpanCoder.Engine
                         break;
                     }
 
+                case MessageTypes.SaveFile:
+                    {
+                        int docId = header.DocumentId;
+                        Log($"ProcessMessage SaveFile: docId={docId}");
+                        if (_documents.TryGetValue(docId, out var doc))
+                        {
+                            try
+                            {
+                                char[] buffer = new char[doc.Length];
+                                doc.PieceTable.GetText(0, doc.Length, buffer);
+                                string text = new string(buffer);
+                                File.WriteAllText(doc.FilePath, text);
+                                Log($"ProcessMessage SaveFile: Saved {doc.FilePath}");
+
+                                // Send response back
+                                byte[] responseBuffer = new byte[BinaryMessageSerializer.HeaderSize];
+                                BinaryMessageSerializer.WriteSaveFileResponse(responseBuffer, docId);
+                                MessageReceived?.Invoke(responseBuffer);
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"ProcessMessage SaveFile failed: {ex.Message}");
+                            }
+                        }
+                        break;
+                    }
+
                 case MessageTypes.InsertText:
                     {
                         var text = BinaryMessageSerializer.ParseInsertText(message, out int docId, out int offset);

@@ -1900,6 +1900,12 @@ namespace SpanCoder.Shell
                     string text = GetDocumentText(_activeDocument.Document);
                     System.IO.File.WriteAllText(_activeDocument.FilePath, text);
                     _activeDocument.IsDirty = false;
+                    if (_engine != null)
+                    {
+                        byte[] saveMsg = new byte[BinaryMessageSerializer.HeaderSize];
+                        BinaryMessageSerializer.WriteSaveFile(saveMsg, _activeDocument.Id);
+                        _engine.Send(saveMsg);
+                    }
                     RebuildTabsUI(_activePane);
                     _statusBar.Text = $"File saved: {_activeDocument.FilePath}";
                     _ = RefreshGitStatusAsync();
@@ -1926,6 +1932,12 @@ namespace SpanCoder.Shell
                         string text = GetDocumentText(docToClose.Document);
                         System.IO.File.WriteAllText(docToClose.FilePath, text);
                         docToClose.IsDirty = false;
+                        if (_engine != null)
+                        {
+                            byte[] saveMsg = new byte[BinaryMessageSerializer.HeaderSize];
+                            BinaryMessageSerializer.WriteSaveFile(saveMsg, docToClose.Id);
+                            _engine.Send(saveMsg);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -3084,6 +3096,12 @@ namespace SpanCoder.Shell
                             string text = GetDocumentText(doc.Document);
                             System.IO.File.WriteAllText(doc.FilePath, text);
                             doc.IsDirty = false;
+                            if (_engine != null)
+                            {
+                                byte[] saveMsg = new byte[BinaryMessageSerializer.HeaderSize];
+                                BinaryMessageSerializer.WriteSaveFile(saveMsg, doc.Id);
+                                _engine.Send(saveMsg);
+                            }
                         }
                         catch (Exception ex)
                         {

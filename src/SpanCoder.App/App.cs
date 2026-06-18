@@ -36,8 +36,43 @@ namespace SpanCoder.App
         {
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
-                // Instantiate and start IPC socket connection to spawned engine
-                var ipc = new IpcEngineConnection();
+                string? remoteHost = null;
+                int remotePort = 0;
+                string? pathMapping = null;
+
+                if (desktop.Args != null)
+                {
+                    for (int i = 0; i < desktop.Args.Length; i++)
+                    {
+                        if (desktop.Args[i] == "--connect" && i + 1 < desktop.Args.Length)
+                        {
+                            var connectVal = desktop.Args[i + 1];
+                            int colonIdx = connectVal.LastIndexOf(':');
+                            if (colonIdx > 0 && int.TryParse(connectVal.Substring(colonIdx + 1), out int port))
+                            {
+                                remoteHost = connectVal.Substring(0, colonIdx);
+                                remotePort = port;
+                            }
+                            i++;
+                        }
+                        else if (desktop.Args[i] == "--map-path" && i + 1 < desktop.Args.Length)
+                        {
+                            pathMapping = desktop.Args[i + 1];
+                            i++;
+                        }
+                    }
+                }
+
+                // Instantiate and start IPC socket connection to spawned or remote engine
+                IpcEngineConnection ipc;
+                if (!string.IsNullOrEmpty(remoteHost))
+                {
+                    ipc = new IpcEngineConnection(remoteHost, remotePort, pathMapping);
+                }
+                else
+                {
+                    ipc = new IpcEngineConnection();
+                }
                 ipc.Start();
                 _engine = ipc;
 

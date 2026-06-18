@@ -112,6 +112,14 @@ graph TD
 ### 15. Git Version Control & Gutter Indicators
 * **Gutter Markers & Staging**: Background Git worker queries status, displaying color-coded line modifications (added, modified, deleted) directly inside the canvas gutter. Includes a sidebar panel for staging files, writing commit messages, and managing branches.
 
+### 16. Embedded Autonomous AI Agent (YOLO Dev)
+* **Out-of-Process Coordination**: Coordinates LLM chat, reasoning, and tool executions (running build/test scripts, reading/writing workspace files, running shell commands) entirely asynchronously in the `SpanCoder.Engine` daemon process.
+* **API Key Encryption (DPAPI)**: Automatically encrypts all API keys using Windows DPAPI (falling back to secure AES on Unix/WSL) before persisting them to `%APPDATA%/SpanCoder/settings.json`.
+* **Chronological Chat & Sizing**: Streams text tokens and tool steps in the exact chronological order of execution. Uses a non-virtualized scrolling list to prevent text clipping and display log outputs at full height.
+* **Auto-Collapsing Tool Cards**: Automatically collapses tool log boxes when execution finishes, keeping the chat feed neat and scan-friendly while allowing one-click manual expansion.
+* **Native Markdown Rendering**: Upgrades plain text output with dynamic block and inline runs, styling headers, horizontal rules, lists, bold/italics, and custom Consolas block code scrollable boxes.
+* **Binary File Safety Guards**: Auto-detects null bytes in files to block the AI agent from accidentally reading or modifying binary DLLs, EXEs, or images.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions
@@ -332,10 +340,10 @@ Interactive debugging features are integrated into the main shell via several de
 
 ## Phased Improvement Roadmap
 
-### Phase 1: AI Copilot & Code Generation Integration (Upcoming)
-* [ ] **Out-of-Process LLM Connector**: Background agent host service to interface with local or cloud-based LLMs without blocking the primary editing loop.
+### Phase 1: AI Copilot & Code Generation Integration
+* [x] **Out-of-Process LLM Connector**: Background agent host service to interface with local or cloud-based LLMs without blocking the primary editing loop.
 * [ ] **Inline Ghost Text**: Support inline ghost-text code completions using zero-allocation overlay renderings.
-* [ ] **AI Chat & Command Palette Actions**: Build a floating sidebar chat window and command palette shortcodes (e.g., `/explain`, `/refactor`, `/fix`) to interact directly with code snippets.
+* [x] **AI Chat & Command Palette Actions**: Build a floating sidebar chat window and command palette shortcodes (e.g., `/explain`, `/refactor`, `/fix`) to interact directly with code snippets.
 
 ### Phase 2: Advanced Editing Features & Multi-Caret Support
 * [ ] **Simultaneous Multi-Cursors**: Enable multi-caret inputs and selections with parallel state updates in the Piece Table.

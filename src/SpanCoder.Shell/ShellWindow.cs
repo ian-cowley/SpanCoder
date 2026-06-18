@@ -3292,12 +3292,26 @@ namespace SpanCoder.Shell
                     UpdateStatusBarText("AI: Starting local Ollama service...");
                     try
                     {
+                        string exePath = "ollama";
+                        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                        string defaultOllamaPath = Path.Combine(localAppData, @"Programs\Ollama\ollama.exe");
+                        bool useShell = false;
+
+                        if (File.Exists(defaultOllamaPath))
+                        {
+                            exePath = defaultOllamaPath;
+                        }
+                        else
+                        {
+                            useShell = true;
+                        }
+
                         var startInfo = new System.Diagnostics.ProcessStartInfo
                         {
-                            FileName = "ollama",
+                            FileName = exePath,
                             Arguments = "serve",
                             CreateNoWindow = true,
-                            UseShellExecute = false
+                            UseShellExecute = useShell
                         };
                         System.Diagnostics.Process.Start(startInfo);
                         

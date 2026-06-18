@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpanCoder.Tests", "src\Span
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpanCoder.Extensions.Languages", "src\SpanCoder.Extensions.Languages\SpanCoder.Extensions.Languages.csproj", "{E59AFB99-196D-42B5-B86E-437251568BFD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpanCoder.Extensions.Prettier", "src\SpanCoder.Extensions.Prettier\SpanCoder.Extensions.Prettier.csproj", "{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -129,6 +131,18 @@ Global
 		{E59AFB99-196D-42B5-B86E-437251568BFD}.Release|x64.Build.0 = Release|Any CPU
 		{E59AFB99-196D-42B5-B86E-437251568BFD}.Release|x86.ActiveCfg = Release|Any CPU
 		{E59AFB99-196D-42B5-B86E-437251568BFD}.Release|x86.Build.0 = Release|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Debug|x64.Build.0 = Debug|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Debug|x86.Build.0 = Debug|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Release|Any CPU.Build.0 = Release|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Release|x64.ActiveCfg = Release|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Release|x64.Build.0 = Release|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Release|x86.ActiveCfg = Release|Any CPU
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -141,5 +155,6 @@ Global
 		{A9730DEF-3296-4F4A-96F4-36703E8F7989} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{A739BFE9-F1BD-4A1E-A102-A7839C2D2FF4} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{E59AFB99-196D-42B5-B86E-437251568BFD} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{57BFDE1D-2188-4EC8-A36A-CAEA72DA8767} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

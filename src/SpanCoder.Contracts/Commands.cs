@@ -116,6 +116,7 @@ namespace SpanCoder.Contracts
         event Action<string, string, string, string, string>? StatusBarItemUpdated;
         void ExecuteCommand(string extensionId, string commandId);
         void AddPendingToken(string token, string extensionId);
+        System.Threading.Tasks.Task<string?> FormatDocumentAsync(string extensionId, int documentId, string filePath, string content);
     }
 
     public readonly record struct LanguageConfigDescriptor(
@@ -160,9 +161,10 @@ namespace SpanCoder.Contracts
         public System.Collections.Generic.List<ToolbarItemDescriptor> ToolbarItems { get; }
         public System.Collections.Generic.List<SettingDescriptor> Settings { get; }
         public System.Collections.Generic.List<StatusBarItemDescriptor> StatusBarItems { get; }
+        public System.Collections.Generic.List<string> Formatters { get; }
 
         public ExtensionManifest(string id, System.Collections.Generic.List<CommandDescriptor> commands, System.Collections.Generic.List<MenuItemDescriptor> menuItems, System.Collections.Generic.List<PanelDescriptor> panels)
-            : this(id, commands, menuItems, panels, new(), new(), new(), new())
+            : this(id, commands, menuItems, panels, new(), new(), new(), new(), new())
         {
         }
 
@@ -175,6 +177,20 @@ namespace SpanCoder.Contracts
             System.Collections.Generic.List<ToolbarItemDescriptor> toolbarItems,
             System.Collections.Generic.List<SettingDescriptor> settings,
             System.Collections.Generic.List<StatusBarItemDescriptor> statusBarItems)
+            : this(id, commands, menuItems, panels, languages, toolbarItems, settings, statusBarItems, new())
+        {
+        }
+
+        public ExtensionManifest(
+            string id, 
+            System.Collections.Generic.List<CommandDescriptor> commands, 
+            System.Collections.Generic.List<MenuItemDescriptor> menuItems, 
+            System.Collections.Generic.List<PanelDescriptor> panels,
+            System.Collections.Generic.List<LanguageConfigDescriptor> languages,
+            System.Collections.Generic.List<ToolbarItemDescriptor> toolbarItems,
+            System.Collections.Generic.List<SettingDescriptor> settings,
+            System.Collections.Generic.List<StatusBarItemDescriptor> statusBarItems,
+            System.Collections.Generic.List<string>? formatters)
         {
             Id = id;
             Commands = commands;
@@ -184,6 +200,7 @@ namespace SpanCoder.Contracts
             ToolbarItems = toolbarItems;
             Settings = settings;
             StatusBarItems = statusBarItems;
+            Formatters = formatters ?? new();
         }
     }
 

@@ -22,6 +22,7 @@ namespace SpanCoder.App
         private readonly List<Process> _extensionProcesses = new();
         private readonly CancellationTokenSource _cts = new();
         private readonly string _pluginsDirectory;
+        private readonly ConcurrentDictionary<(string ExtensionId, int DocumentId), TaskCompletionSource<string>> _pendingFormatRequests = new();
 
         public void AddPendingToken(string token, string extensionId)
         {
@@ -288,6 +289,15 @@ namespace SpanCoder.App
                         BinaryMessageSerializer.ParseUpdateExtensionStatusBarItem(payload, out string itemId, out string text, out string tooltip, out string commandId);
                         StatusBarItemUpdated?.Invoke(registeredExtensionId ?? "", itemId, text, tooltip, commandId);
                     }
+                    else if (header.Type == MessageTypes.FormatDocumentResponse)
+                    {
+                        string formattedContent = BinaryMessageSerializer.ParseFormatDocumentResponse(payload, out int docId);
+                        var key = (registeredExtensionId ?? "", docId);
+                        if (_pendingFormatRequests.TryRemove(key, out var tcs))
+                        {
+                            tcs.TrySetResult(formattedContent);
+                        }
+                    }
                     else if (header.Type == MessageTypes.RegisterExtension)
                     {
                         throw new InvalidDataException("Extension already registered");
@@ -357,6 +367,53 @@ namespace SpanCoder.App
             else
             {
                 Console.WriteLine($"[ExtensionManager] Cannot execute command '{commandId}': Extension '{extensionId}' is not connected.");
+            }
+        }
+
+        public async Task<string?> FormatDocumentAsync(string extensionId, int documentId, string filePath, string content)
+        {
+            if (!_activeExtensions.TryGetValue(extensionId, out var ext))
+            {
+                return null;
+            }
+
+            var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var key = (extensionId, documentId);
+            _pendingFormatRequests[key] = tcs;
+
+            try
+            {
+                int sizeNeeded = BinaryMessageSerializer.HeaderSize + 4 + filePath.Length * sizeof(char) + 4 + content.Length * sizeof(char);
+                byte[] temp = new byte[sizeNeeded];
+                int len = BinaryMessageSerializer.WriteFormatDocumentRequest(temp, documentId, filePath, content);
+                byte[] payload = new byte[len];
+                Array.Copy(temp, 0, payload, 0, len);
+
+                lock (ext.WriteLock)
+                {
+                    ext.Stream.Write(payload, 0, len);
+                    ext.Stream.Flush();
+                }
+
+                var delayTask = Task.Delay(TimeSpan.FromSeconds(3));
+                var completedTask = await Task.WhenAny(tcs.Task, delayTask);
+
+                if (completedTask == tcs.Task)
+                {
+                    return await tcs.Task;
+                }
+                else
+                {
+                    Console.WriteLine($"[ExtensionManager] Formatting request timed out for extension '{extensionId}' and document {documentId}.");
+                    _pendingFormatRequests.TryRemove(key, out _);
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ExtensionManager] Error during formatting request: {ex.Message}");
+                _pendingFormatRequests.TryRemove(key, out _);
+                return null;
             }
         }
 
@@ -476,7 +533,16 @@ namespace SpanCoder.App
                 }
             }
 
-            return new ExtensionManifest(id, commands, menuItems, panels, languages, toolbarItems, settings, statusBarItems);
+            var formatters = new List<string>();
+            if (root.TryGetProperty("formatters", out var formattersEl))
+            {
+                foreach (var el in formattersEl.EnumerateArray())
+                {
+                    formatters.Add(el.GetString() ?? "");
+                }
+            }
+
+            return new ExtensionManifest(id, commands, menuItems, panels, languages, toolbarItems, settings, statusBarItems, formatters);
         }
 
         private void OnSettingChanged(string settingId)

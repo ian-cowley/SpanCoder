@@ -47,6 +47,8 @@ namespace SpanCoder.Contracts
         public const byte SaveFileResponse = 40;
         public const byte UpdateExtensionStatusBarItem = 41;
         public const byte ExtensionSettingChanged = 42;
+        public const byte FormatDocumentRequest = 43;
+        public const byte FormatDocumentResponse = 44;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -1737,6 +1739,110 @@ namespace SpanCoder.Contracts
                 value = new string(MemoryMarshal.Cast<byte, char>(bytes));
                 readOffset += valueLen * sizeof(char);
             }
+        }
+
+        public static int WriteFormatDocumentRequest(Span<byte> buffer, int documentId, ReadOnlySpan<char> filePath, ReadOnlySpan<char> content)
+        {
+            int pathBytesCount = filePath.Length * sizeof(char);
+            int contentBytesCount = content.Length * sizeof(char);
+            int totalLength = HeaderSize + sizeof(int) + pathBytesCount + sizeof(int) + contentBytesCount;
+
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.FormatDocumentRequest, totalLength, documentId, 0);
+            int writeOffset = HeaderSize;
+
+            int pathLen = filePath.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in pathLen);
+            writeOffset += sizeof(int);
+
+            if (pathLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(filePath);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += pathBytesCount;
+            }
+
+            int contentLen = content.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in contentLen);
+            writeOffset += sizeof(int);
+
+            if (contentLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(content);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+            }
+
+            return totalLength;
+        }
+
+        public static void ParseFormatDocumentRequest(ReadOnlySpan<byte> messageBuffer, out int documentId, out string filePath, out string content)
+        {
+            var header = MemoryMarshal.Read<MessageHeader>(messageBuffer.Slice(0, HeaderSize));
+            documentId = header.DocumentId;
+
+            int readOffset = HeaderSize;
+
+            int pathLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+
+            filePath = "";
+            if (pathLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, pathLen * sizeof(char));
+                filePath = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += pathLen * sizeof(char);
+            }
+
+            int contentLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+
+            content = "";
+            if (contentLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, contentLen * sizeof(char));
+                content = new string(MemoryMarshal.Cast<byte, char>(bytes));
+            }
+        }
+
+        public static int WriteFormatDocumentResponse(Span<byte> buffer, int documentId, ReadOnlySpan<char> formattedContent)
+        {
+            int contentBytesCount = formattedContent.Length * sizeof(char);
+            int totalLength = HeaderSize + sizeof(int) + contentBytesCount;
+
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.FormatDocumentResponse, totalLength, documentId, 0);
+            int writeOffset = HeaderSize;
+
+            int contentLen = formattedContent.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in contentLen);
+            writeOffset += sizeof(int);
+
+            if (contentLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(formattedContent);
+                bytes.CopyTo(buffer.Slice(writeOffset));
+            }
+
+            return totalLength;
+        }
+
+        public static string ParseFormatDocumentResponse(ReadOnlySpan<byte> messageBuffer, out int documentId)
+        {
+            var header = MemoryMarshal.Read<MessageHeader>(messageBuffer.Slice(0, HeaderSize));
+            documentId = header.DocumentId;
+
+            int contentLen = MemoryMarshal.Read<int>(messageBuffer.Slice(HeaderSize, sizeof(int)));
+            if (contentLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(HeaderSize + sizeof(int), contentLen * sizeof(char));
+                return new string(MemoryMarshal.Cast<byte, char>(bytes));
+            }
+
+            return "";
         }
     }
 }

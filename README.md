@@ -142,6 +142,11 @@ graph TD
 * **Smart Interaction Keybindings**: Press `Tab` to accept and insert the suggestion, or `Esc` (or type any key) to dismiss it.
 * **Offline Privacy Protection**: Completely offline—zero API subscriptions, cloud costs, or tracking.
 
+### 20. Out-of-Process Prettier Formatter Plugin
+* **Asynchronous Formatting** (`SpanCoder.Extensions.Prettier`): Out-of-process extension that supports manual formatting (`Alt+Shift+F` or via context menu/command palette) and asynchronous Format-on-Save.
+* **Process Boundary Security**: Passes active buffers over the secure loopback TCP connection, utilizing a 3-second timeout guard to ensure host UI responsiveness.
+* **Fallback Smart Indenting**: Attempts to invoke `npx prettier` under the hood, with a built-in smart brace indenter fallback for JSON/JS/CSS to ensure instant formatting even without Node.js installed.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions
@@ -380,7 +385,7 @@ Interactive debugging features are integrated into the main shell via several de
 
 ### Phase 4: Ecosystem & High-Value Extensions
 * [/] **SpanCoder.Extensions.GitLens**: Add inline git blame annotations (rendered as faded ghost-text at the end of active lines) [Completed], branching commit history graph, and interactive visual diff panels.
-* [ ] **SpanCoder.Extensions.Prettier**: Support format-on-save asynchronously by pipe-routing code buffers to external linters/formatters (`prettier`, `black`, `dotnet-format`) in background processes.
+* [x] **SpanCoder.Extensions.Prettier**: Support format-on-save asynchronously by pipe-routing code buffers to external linters/formatters (`prettier`, `black`, `dotnet-format`) in background processes.
 * [x] **SpanCoder.Extensions.ErrorLens**: Render full LSP compiler diagnostics descriptions directly at the end of the problematic line using Skia text overlays.
 * [ ] **Focus Mode & Zen Workspace Layout**: Toggled workspace layout (`Ctrl+K, Z`) that collapses the side panels, status bar, and gutters for a distraction-free, code-first canvas.
 * [ ] **Visual Git Diff & Native PR Code Reviews**: Side-by-side split Diff pane to review git modifications and pull requests directly inside the editor without context switching.

@@ -73,6 +73,7 @@ namespace SpanCoder.Shell
             RegisterBuiltIn("ai.ollama.apikey", "Ollama API Key (Optional)", "string", "");
             RegisterBuiltIn("ai.ollama.model", "Ollama Model", "string", "qwen2.5-coder:7b");
             RegisterBuiltIn("editor.vimEnabled", "Enable Vim Emulation", "boolean", "false");
+            RegisterBuiltIn("editor.formatOnSave", "Format on Save", "boolean", "false");
 
             Load();
         }

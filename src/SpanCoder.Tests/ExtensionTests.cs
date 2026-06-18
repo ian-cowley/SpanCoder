@@ -520,5 +520,107 @@ namespace SpanCoder.Tests
                 }
             }
         }
+
+        [Fact]
+        public async Task TestExtensionFormatting()
+        {
+            string tempPluginsDir = Path.Combine(Path.GetTempPath(), "SpanCoderTests_Plugins_Formatting_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempPluginsDir);
+
+            try
+            {
+                using var manager = new ExtensionManager(tempPluginsDir);
+
+                bool registered = false;
+                ExtensionManifest? receivedManifest = null;
+                string? registeredExtId = null;
+
+                manager.ExtensionRegistered += (extId, manifest) =>
+                {
+                    registeredExtId = extId;
+                    receivedManifest = manifest;
+                    registered = true;
+                };
+
+                manager.Start();
+                int port = manager.Port;
+
+                using var client = new TcpClient();
+                await client.ConnectAsync("127.0.0.1", port);
+                using var stream = client.GetStream();
+
+                string manifestJson = "{" +
+                    "\"id\":\"prettier-extension\"," +
+                    "\"formatters\":[\".js\", \".json\"]" +
+                "}";
+
+                string token = "test-token-format";
+                manager.AddPendingToken(token, "prettier-extension");
+
+                byte[] jsonBytes = Encoding.UTF8.GetBytes(manifestJson);
+                byte[] regBuffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
+                int regLen = BinaryMessageSerializer.WriteRegisterExtension(regBuffer, token, jsonBytes);
+
+                await stream.WriteAsync(regBuffer, 0, regLen);
+                await stream.FlushAsync();
+
+                int retries = 0;
+                while (!registered && retries++ < 50)
+                {
+                    await Task.Delay(100);
+                }
+
+                Assert.True(registered, "Extension should be registered");
+                Assert.Equal("prettier-extension", registeredExtId);
+                Assert.NotNull(receivedManifest);
+                Assert.Equal(2, receivedManifest.Value.Formatters.Count);
+                Assert.Equal(".js", receivedManifest.Value.Formatters[0]);
+
+                // Start mock extension message processing loop
+                var clientLoopTask = Task.Run(async () =>
+                {
+                    byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
+                    int r = await ReadExactlyAsync(stream, headerBuffer, 0, headerBuffer.Length);
+                    if (r <= 0) return;
+
+                    if (!BinaryMessageSerializer.TryParseHeader(headerBuffer, out var header)) return;
+
+                    byte[] payload = new byte[header.Length];
+                    Array.Copy(headerBuffer, 0, payload, 0, headerBuffer.Length);
+                    if (header.Length > headerBuffer.Length)
+                    {
+                        await ReadExactlyAsync(stream, payload, headerBuffer.Length, header.Length - headerBuffer.Length);
+                    }
+
+                    if (header.Type == MessageTypes.FormatDocumentRequest)
+                    {
+                        BinaryMessageSerializer.ParseFormatDocumentRequest(payload, out int docId, out string filePath, out string content);
+                        
+                        string formatted = content + " // formatted";
+                        
+                        byte[] respBuffer = new byte[1024];
+                        int respLen = BinaryMessageSerializer.WriteFormatDocumentResponse(respBuffer, docId, formatted);
+
+                        await stream.WriteAsync(respBuffer, 0, respLen);
+                        await stream.FlushAsync();
+                    }
+                });
+
+                string originalContent = "function foo() {}";
+                string? formattedResult = await manager.FormatDocumentAsync("prettier-extension", 42, "test.js", originalContent);
+
+                Assert.NotNull(formattedResult);
+                Assert.Equal("function foo() {} // formatted", formattedResult);
+
+                await clientLoopTask;
+            }
+            finally
+            {
+                if (Directory.Exists(tempPluginsDir))
+                {
+                    Directory.Delete(tempPluginsDir, true);
+                }
+            }
+        }
     }
 }

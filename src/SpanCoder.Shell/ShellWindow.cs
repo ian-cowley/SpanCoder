@@ -98,6 +98,7 @@ namespace SpanCoder.Shell
         private readonly Dictionary<string, List<string>> _extensionPanelIds = new();
         private readonly Dictionary<string, List<string>> _extensionLanguageExts = new();
         private readonly Dictionary<string, (System.Net.Sockets.TcpClient Client, System.Threading.CancellationTokenSource Cts)> _mockExtensionConnections = new();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _formattersByFileExtension = new(StringComparer.OrdinalIgnoreCase);
 
         public ShellWindow()
         {
@@ -1052,6 +1053,13 @@ namespace SpanCoder.Shell
                             RegisterPluginStatusBarItem(extId, item);
                         }
                     }
+                    if (manifest.Formatters != null)
+                    {
+                        foreach (var fmt in manifest.Formatters)
+                        {
+                            _formattersByFileExtension[fmt] = extId;
+                        }
+                    }
                 });
             };
 
@@ -1060,6 +1068,11 @@ namespace SpanCoder.Shell
                 Dispatcher.UIThread.Post(() =>
                 {
                     UnregisterExtensionUI(extId);
+                    var keysToRemove = _formattersByFileExtension.Where(kvp => kvp.Value == extId).Select(kvp => kvp.Key).ToList();
+                    foreach (var key in keysToRemove)
+                    {
+                        _formattersByFileExtension.TryRemove(key, out _);
+                    }
                 });
             };
 
@@ -1936,6 +1949,13 @@ namespace SpanCoder.Shell
             window.SaveFile();
         }
 
+        [Command("Edit.FormatDocument", "Format Document", "Edit", "Alt+Shift+F")]
+        [MenuItem("Edit.FormatDocument", "Edit/Format Document", 75)]
+        public static async void FormatDocumentCommand(ShellWindow window)
+        {
+            await window.FormatActiveDocumentAsync();
+        }
+
         [Command("Edit.ToggleVim", "Toggle Vim Emulation", "Edit", "Ctrl+Alt+V")]
         [MenuItem("Edit.ToggleVim", "Tools/Toggle Vim Emulation", 80)]
         public static void ToggleVimCommand(ShellWindow window)
@@ -2230,13 +2250,27 @@ namespace SpanCoder.Shell
             return sb.ToString();
         }
 
-        public void SaveFile()
+        public async void SaveFile()
         {
             if (_activeDocument != null && _activeDocument.Document != null)
             {
                 try
                 {
                     string text = GetDocumentText(_activeDocument.Document);
+
+                    bool formatOnSave = SettingsManager.Get<bool>("editor.formatOnSave", false);
+                    string ext = System.IO.Path.GetExtension(_activeDocument.FilePath) ?? "";
+                    if (formatOnSave && _extensionManager != null && _formattersByFileExtension.TryGetValue(ext, out var extId))
+                    {
+                        _statusBar.Text = "Formatting document...";
+                        string? formattedText = await _extensionManager.FormatDocumentAsync(extId, _activeDocument.Id, _activeDocument.FilePath, text);
+                        if (formattedText != null && formattedText != text)
+                        {
+                            text = formattedText;
+                            ReplaceDocumentText(_activeDocument.Id, text);
+                        }
+                    }
+
                     System.IO.File.WriteAllText(_activeDocument.FilePath, text);
                     _activeDocument.IsDirty = false;
                     if (_engine != null)
@@ -2253,6 +2287,58 @@ namespace SpanCoder.Shell
                 catch (Exception ex)
                 {
                     _statusBar.Text = $"Failed to save file: {ex.Message}";
+                }
+            }
+        }
+
+        private void ReplaceDocumentText(int docId, string newText)
+        {
+            if (_engine == null) return;
+            var doc = _engine.GetDocument(docId);
+            if (doc == null) return;
+
+            var edits = new[]
+            {
+                new TextEdit { Offset = 0, DeleteLength = doc.Length, Text = newText }
+            };
+
+            byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + sizeof(int) * 3 + newText.Length * sizeof(char)];
+            int len = BinaryMessageSerializer.WriteBatchEditRequest(buffer, docId, edits);
+            byte[] finalBuffer = new byte[len];
+            Array.Copy(buffer, 0, finalBuffer, 0, len);
+            _engine.Send(finalBuffer);
+        }
+
+        public async Task FormatActiveDocumentAsync()
+        {
+            if (_activeDocument != null && _activeDocument.Document != null && _extensionManager != null)
+            {
+                string ext = System.IO.Path.GetExtension(_activeDocument.FilePath) ?? "";
+                if (_formattersByFileExtension.TryGetValue(ext, out var extId))
+                {
+                    _statusBar.Text = "Formatting document...";
+                    string text = GetDocumentText(_activeDocument.Document);
+                    string? formattedText = await _extensionManager.FormatDocumentAsync(extId, _activeDocument.Id, _activeDocument.FilePath, text);
+                    if (formattedText != null)
+                    {
+                        if (formattedText != text)
+                        {
+                            ReplaceDocumentText(_activeDocument.Id, formattedText);
+                            _statusBar.Text = "Document formatted.";
+                        }
+                        else
+                        {
+                            _statusBar.Text = "Document is already formatted.";
+                        }
+                    }
+                    else
+                    {
+                        _statusBar.Text = "Formatting failed or timed out.";
+                    }
+                }
+                else
+                {
+                    _statusBar.Text = $"No formatter registered for extension '{ext}'.";
                 }
             }
         }

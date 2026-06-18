@@ -1,0 +1,26 @@
+{
+  "id": "prettier-extension",
+  "displayName": "Prettier Formatter Extension",
+  "version": "1.0.0",
+  "entryPoint": "SpanCoder.Extensions.Prettier.dll",
+  "formatters": [
+    ".js",
+    ".json",
+    ".css"
+  ],
+  "commands": [
+    {
+      "id": "prettier.format",
+      "displayName": "Format Document with Prettier",
+      "category": "Format"
+    }
+  ],
+  "settings": [
+    {
+      "id": "prettier-extension.prettierPath",
+      "displayName": "Prettier CLI Path",
+      "type": "string",
+      "defaultValue": ""
+    }
+  ]
+}

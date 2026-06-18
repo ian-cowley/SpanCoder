@@ -246,6 +246,47 @@ namespace SpanCoder.Shell
 
         public FindReplaceOverlay? FindReplaceOverlay { get; set; }
 
+        public void UpdateDocumentView()
+        {
+            if (ActiveDocument != null && ActiveDocument.FilePath.StartsWith("extension://"))
+            {
+                Canvas.IsVisible = false;
+                VScroll.IsVisible = false;
+                HScroll.IsVisible = false;
+
+                // Remove existing Extension view if any
+                var existing = EditorGrid.Children.Cast<Control>().FirstOrDefault(c => c != Canvas && c != VScroll && c != HScroll && !(c is FindReplaceOverlay));
+                if (existing != null)
+                {
+                    EditorGrid.Children.Remove(existing);
+                }
+
+                // Create and add the new extension details view control!
+                var extId = ActiveDocument.FilePath.Substring("extension://".Length);
+                var extDetailsView = _window.CreateExtensionDetailsView(extId);
+                if (extDetailsView != null)
+                {
+                    EditorGrid.Children.Add(extDetailsView);
+                    Grid.SetRow(extDetailsView, 0);
+                    Grid.SetColumn(extDetailsView, 0);
+                    Grid.SetRowSpan(extDetailsView, 2);
+                    Grid.SetColumnSpan(extDetailsView, 2);
+                }
+            }
+            else
+            {
+                Canvas.IsVisible = true;
+                VScroll.IsVisible = true;
+                HScroll.IsVisible = true;
+
+                var existing = EditorGrid.Children.Cast<Control>().FirstOrDefault(c => c != Canvas && c != VScroll && c != HScroll && !(c is FindReplaceOverlay));
+                if (existing != null)
+                {
+                    EditorGrid.Children.Remove(existing);
+                }
+            }
+        }
+
         public void ShowFindReplace(bool showReplace)
         {
             if (FindReplaceOverlay == null)

@@ -838,6 +838,15 @@ namespace SpanCoder.Shell
                 return itemPanel;
             }, true);
 
+            extListBox.SelectionChanged += (s, e) =>
+            {
+                if (extListBox.SelectedItem is MarketplaceExtension selected)
+                {
+                    OpenExtensionDetailsPage(selected);
+                    extListBox.SelectedItem = null;
+                }
+            };
+
             var extTabHeader = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2) };
             extTabHeader.Children.Add(new Avalonia.Controls.Shapes.Path
             {
@@ -2435,6 +2444,7 @@ namespace SpanCoder.Shell
             UpdateEditMenuState();
             UpdateInlayHintsAndCodeLens();
             TriggerHtmlPreviewUpdate();
+            _activePane.UpdateDocumentView();
         }
 
         public string GetDocumentText(IDocumentView doc)
@@ -2598,6 +2608,7 @@ namespace SpanCoder.Shell
                     RebuildTabsUI();
                     UpdateScrollbars();
                     UpdateStatusBar();
+                    _activePane.UpdateDocumentView();
                 }
             }
             else
@@ -2625,9 +2636,12 @@ namespace SpanCoder.Shell
                 };
 
                 var tabContent = new StackPanel { Orientation = Orientation.Horizontal };
+                string tabName = doc.FilePath.StartsWith("extension://") 
+                    ? "Extension: " + doc.FilePath.Substring("extension://".Length)
+                    : System.IO.Path.GetFileName(doc.FilePath);
                 var nameLabel = new TextBlock
                 {
-                    Text = System.IO.Path.GetFileName(doc.FilePath) + (doc.IsDirty ? "*" : ""),
+                    Text = tabName + (doc.IsDirty ? "*" : ""),
                     Foreground = doc == pane.ActiveDocument ? Brushes.White : Brushes.Gray,
                     VerticalAlignment = VerticalAlignment.Center,
                     FontSize = 12
@@ -4113,6 +4127,292 @@ namespace SpanCoder.Shell
                     string content = GetDocumentText(_activeDocument.Document);
                     _ = SendMockExtensionPanelUpdate("html-preview", "html-preview-panel", content);
                 }
+            }
+        }
+
+        private void OpenExtensionDetailsPage(MarketplaceExtension item)
+        {
+            string extUrl = $"extension://{item.Id}";
+            var existing = _openDocuments.FirstOrDefault(d => d.FilePath.Equals(extUrl, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                SwitchToDocument(existing);
+                return;
+            }
+
+            var docView = new ExtensionDocumentView(extUrl);
+            var doc = new OpenDocument(_openDocuments.Count + 1000, extUrl, docView);
+            
+            _openDocuments.Add(doc);
+            SwitchToDocument(doc);
+        }
+
+        internal Control? CreateExtensionDetailsView(string extId)
+        {
+            var item = _marketplaceExtensions.FirstOrDefault(x => x.Id == extId);
+            if (item == null) return null;
+
+            var scrollViewer = new ScrollViewer
+            {
+                Background = new SolidColorBrush(Color.Parse("#1E1E1E")),
+                Padding = new Thickness(24)
+            };
+
+            var mainPanel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 16 };
+            scrollViewer.Content = mainPanel;
+
+            var headerPanel = new StackPanel { Spacing = 8 };
+            var nameLabel = new TextBlock
+            {
+                Text = item.Name,
+                Foreground = Brushes.White,
+                FontWeight = FontWeight.Bold,
+                FontSize = 24
+            };
+            headerPanel.Children.Add(nameLabel);
+
+            var descLabel = new TextBlock
+            {
+                Text = item.Description,
+                Foreground = Brushes.LightGray,
+                FontSize = 14,
+                TextWrapping = TextWrapping.Wrap
+            };
+            headerPanel.Children.Add(descLabel);
+
+            var metaLabel = new TextBlock
+            {
+                Text = $"Identifier: {item.Id}  |  Version: 1.0.0  |  Publisher: SpanCoder",
+                Foreground = Brushes.Gray,
+                FontSize = 11
+            };
+            headerPanel.Children.Add(metaLabel);
+
+            mainPanel.Children.Add(headerPanel);
+
+            var btnAction = new Button
+            {
+                Content = item.IsInstalled ? "Uninstall" : "Install",
+                Background = item.IsInstalled ? new SolidColorBrush(Color.Parse("#444444")) : new SolidColorBrush(Color.Parse("#0E639C")),
+                Foreground = Brushes.White,
+                FontSize = 12,
+                FontWeight = FontWeight.SemiBold,
+                Padding = new Thickness(16, 6),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            btnAction.Click += (s, e) =>
+            {
+                if (item.IsInstalled)
+                {
+                    if (item.Id == "prettier-extension" || item.Id == "languages-extension")
+                    {
+                        if (_extensionManager != null)
+                        {
+                            _extensionManager.UninstallPlugin(item.Id);
+                        }
+                        else
+                        {
+                            UnregisterExtensionUI(item.Id);
+                        }
+                    }
+                    else
+                    {
+                        StopMockExtension(item.Id);
+                        UnregisterExtensionUI(item.Id);
+                    }
+                    item.IsInstalled = false;
+                }
+                else
+                {
+                    if (item.Id == "prettier-extension" || item.Id == "languages-extension")
+                    {
+                        var pluginsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins", item.Id);
+                        if (System.IO.Directory.Exists(pluginsDir) && _extensionManager != null)
+                        {
+                            _extensionManager.InstallAndLaunchPlugin(pluginsDir);
+                            item.IsInstalled = true;
+                        }
+                        else
+                        {
+                            StartMockExtension(item.Id, item.ManifestJson);
+                            item.IsInstalled = true;
+                        }
+                    }
+                    else
+                    {
+                        StartMockExtension(item.Id, item.ManifestJson);
+                        item.IsInstalled = true;
+                    }
+                }
+                
+                _refreshExtensionsListAction?.Invoke();
+                _activePane.UpdateDocumentView();
+            };
+            mainPanel.Children.Add(btnAction);
+
+            mainPanel.Children.Add(new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Color.Parse("#3D3D3D")),
+                Margin = new Thickness(0, 8)
+            });
+
+            var readmePanel = new StackPanel { Spacing = 8 };
+            var readmeTitle = new TextBlock
+            {
+                Text = "Details",
+                Foreground = Brushes.White,
+                FontWeight = FontWeight.Bold,
+                FontSize = 16
+            };
+            readmePanel.Children.Add(readmeTitle);
+
+            string readmeText = "";
+            if (item.Id == "prettier-extension")
+            {
+                readmeText = "Prettier Formatter Extension registers a formatter for JavaScript (.js), JSON (.json), and CSS (.css) files.\n\n" +
+                             "Usage:\n" +
+                             "• Auto-format on save: Enable the 'Format on Save' setting.\n" +
+                             "• Manual format: Use Alt+Shift+F shortcut or click the Format button in the toolbar.\n\n" +
+                             "This extension runs out-of-process and communicates with the editor via a local TCP connection.";
+            }
+            else if (item.Id == "languages-extension")
+            {
+                readmeText = "Core Languages Support extension registers rich language configurations for Python (.py), C++ (.cpp), Rust (.rs), and Go (.go).\n\n" +
+                             "Features:\n" +
+                             "• Rich syntax highlighting (keywords, types, string literals).\n" +
+                             "• Line and block comment toggles.\n" +
+                             "• Status bar integration and toolbar action buttons ('Run Py', 'Cargo Build').\n\n" +
+                             "When Language Servers (like rust-analyzer, clangd, pylsp) are available on your system PATH, the Engine will automatically launch them to provide IntelliSense, auto-completion, and diagnostics.";
+            }
+            else if (item.Id == "html-preview")
+            {
+                readmeText = "HTML Previewer provides a live, real-time preview of your HTML files directly within the editor.\n\n" +
+                             "Usage:\n" +
+                             "• Click 'Show HTML Preview' from the toolbar, context menu, or command palette.\n" +
+                             "• The preview tab will open in the main tab area and update live as you edit your HTML code.";
+            }
+            else if (item.Id == "python-lang")
+            {
+                readmeText = "Provides basic syntax highlighting and execution tools for Python script files.";
+            }
+            else
+            {
+                readmeText = "Details are not available for this extension.";
+            }
+
+            var readmeLabel = new TextBlock
+            {
+                Text = readmeText,
+                Foreground = Brushes.LightGray,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            };
+            readmePanel.Children.Add(readmeLabel);
+            mainPanel.Children.Add(readmePanel);
+
+            var extSettings = SettingsManager.GetDescriptors()
+                .Where(d => d.Id.StartsWith(extId + ".", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (extSettings.Count > 0)
+            {
+                mainPanel.Children.Add(new Border
+                {
+                    Height = 1,
+                    Background = new SolidColorBrush(Color.Parse("#3D3D3D")),
+                    Margin = new Thickness(0, 8)
+                });
+
+                var settingsPanel = new StackPanel { Spacing = 10 };
+                var settingsTitle = new TextBlock
+                {
+                    Text = "Settings",
+                    Foreground = Brushes.White,
+                    FontWeight = FontWeight.Bold,
+                    FontSize = 16
+                };
+                settingsPanel.Children.Add(settingsTitle);
+
+                foreach (var desc in extSettings)
+                {
+                    var settingRow = new StackPanel { Spacing = 4 };
+                    var settingLabel = new TextBlock
+                    {
+                        Text = desc.DisplayName,
+                        Foreground = Brushes.White,
+                        FontSize = 12,
+                        FontWeight = FontWeight.SemiBold
+                    };
+                    settingRow.Children.Add(settingLabel);
+
+                    var settingIdLabel = new TextBlock
+                    {
+                        Text = desc.Id,
+                        Foreground = Brushes.Gray,
+                        FontSize = 10
+                    };
+                    settingRow.Children.Add(settingIdLabel);
+
+                    string currentVal = SettingsManager.Get(desc.Id);
+
+                    if (desc.Type == "boolean")
+                    {
+                        var cb = new CheckBox
+                        {
+                            IsChecked = currentVal.Equals("true", StringComparison.OrdinalIgnoreCase),
+                            Foreground = Brushes.LightGray,
+                            Content = "Enabled",
+                            Margin = new Thickness(0, 2, 0, 8)
+                        };
+                        cb.Checked += (s, e) => SettingsManager.Set(desc.Id, "true");
+                        cb.Unchecked += (s, e) => SettingsManager.Set(desc.Id, "false");
+                        settingRow.Children.Add(cb);
+                    }
+                    else
+                    {
+                        var tb = new TextBox
+                        {
+                            Text = currentVal,
+                            Background = new SolidColorBrush(Color.Parse("#252526")),
+                            Foreground = Brushes.White,
+                            BorderThickness = new Thickness(1),
+                            BorderBrush = new SolidColorBrush(Color.Parse("#3E3E42")),
+                            Width = 400,
+                            HorizontalAlignment = HorizontalAlignment.Left,
+                            Margin = new Thickness(0, 2, 0, 8)
+                        };
+                        tb.TextChanged += (s, e) => SettingsManager.Set(desc.Id, tb.Text ?? "");
+                        settingRow.Children.Add(tb);
+                    }
+
+                    settingsPanel.Children.Add(settingRow);
+                }
+                mainPanel.Children.Add(settingsPanel);
+            }
+
+            return scrollViewer;
+        }
+
+        private class ExtensionDocumentView : IDocumentView
+        {
+            public int Id => -999;
+            public string FilePath { get; }
+            public int GetLineCount() => 1;
+            public ReadOnlySpan<char> GetLine(int lineIndex, out bool isContiguous, out char[]? rentedBuffer)
+            {
+                isContiguous = true;
+                rentedBuffer = null;
+                return ReadOnlySpan<char>.Empty;
+            }
+            public long GetLineStart(int lineIndex) => 0;
+            public int Length => 0;
+            public string GetTextRange(int offset, int length) => "";
+
+            public ExtensionDocumentView(string filePath)
+            {
+                FilePath = filePath;
             }
         }
 

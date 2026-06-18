@@ -568,14 +568,14 @@ EndGlobal
 
         // Hover over "TestClass" in a different text context
         string sourceText = "TestClass obj = new TestClass();";
-        string result = method.Invoke(null, new object[] { docs, "file:///Another.cs", sourceText, 0, 2 }) as string;
+        string? result = method.Invoke(null, new object[] { docs, "file:///Another.cs", sourceText, 0, 2 }) as string;
         Assert.NotNull(result);
         Assert.Contains("TestClass.cs", result);
         Assert.Contains("\"line\":2", result);
         Assert.Contains("\"character\":13", result);
 
         // Hover over "TestMethod"
-        string resultMethod = method.Invoke(null, new object[] { docs, "file:///Another.cs", "obj.TestMethod();", 0, 5 }) as string;
+        string? resultMethod = method.Invoke(null, new object[] { docs, "file:///Another.cs", "obj.TestMethod();", 0, 5 }) as string;
         Assert.NotNull(resultMethod);
         Assert.Contains("TestClass.cs", resultMethod);
         Assert.Contains("\"line\":4", resultMethod);
@@ -674,19 +674,19 @@ EndGlobal
 
         // 1. References for "TestClass"
         string sourceText = "TestClass obj = new TestClass();";
-        string refResult = refMethod.Invoke(null, new object[] { docs, "file:///Another.cs", sourceText, 0, 2 }) as string;
+        string? refResult = refMethod.Invoke(null, new object[] { docs, "file:///Another.cs", sourceText, 0, 2 }) as string;
         Assert.NotNull(refResult);
         Assert.Contains("TestClass.cs", refResult);
         Assert.Contains("\"line\":0", refResult); // definition is at line 0
 
         // 2. Rename "TestClass" to "RenamedClass"
-        string renameResult = renameMethod.Invoke(null, new object[] { docs, "file:///Another.cs", sourceText, 0, 2, "RenamedClass" }) as string;
+        string? renameResult = renameMethod.Invoke(null, new object[] { docs, "file:///Another.cs", sourceText, 0, 2, "RenamedClass" }) as string;
         Assert.NotNull(renameResult);
         Assert.Contains("RenamedClass", renameResult);
         Assert.Contains("TestClass.cs", renameResult);
 
         // 3. Document symbols for "TestClass.cs"
-        string symbolsResult = symbolsMethod.Invoke(null, new object[] { "file:///TestClass.cs", docs["file:///TestClass.cs"] }) as string;
+        string? symbolsResult = symbolsMethod.Invoke(null, new object[] { "file:///TestClass.cs", docs["file:///TestClass.cs"] }) as string;
         Assert.NotNull(symbolsResult);
         Assert.Contains("TestClass", symbolsResult);
         Assert.Contains("TestMethod", symbolsResult);
@@ -793,7 +793,11 @@ EndGlobal
             SentMessages.Add(message);
         }
 
-        public event Action<byte[]>? MessageReceived;
+        public event Action<byte[]>? MessageReceived
+        {
+            add { }
+            remove { }
+        }
         public IDocumentView? GetDocument(int documentId) => Document;
         public Document Document { get; set; } = null!;
     }
@@ -1013,7 +1017,7 @@ EndGlobal";
         var findWorkspaceMethod = typeof(EngineHost)
             .GetMethod("FindWorkspacePath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(findWorkspaceMethod);
-        string workspace = findWorkspaceMethod.Invoke(null, new object[] { "C:/dummy.py" }) as string;
+        string? workspace = findWorkspaceMethod.Invoke(null, new object[] { "C:/dummy.py" }) as string;
         Assert.NotNull(workspace);
 
         // 2. Test spawning multiple mock LspClients in EngineHost

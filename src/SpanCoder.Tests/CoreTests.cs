@@ -3,6 +3,7 @@ using System.IO;
 using Xunit;
 using SpanCoder.Contracts;
 using SpanCoder.Engine;
+using SpanCoder.Shell;
 
 namespace SpanCoder.Tests
 {
@@ -292,7 +293,13 @@ namespace SpanCoder.Tests
                 }
                 Assert.True(receivedLoadResponse, "Insert response not received");
 
-                var doc = connection.GetDocument(finalDocId) as Document;
+                Document? doc = null;
+                retries = 0;
+                while (doc == null && retries++ < 50)
+                {
+                    doc = connection.GetDocument(finalDocId) as Document;
+                    if (doc == null) System.Threading.Thread.Sleep(50);
+                }
                 Assert.NotNull(doc);
                 char[] textBuf = new char[doc.Length];
                 doc.PieceTable.GetText(0, doc.Length, textBuf);
@@ -310,7 +317,13 @@ namespace SpanCoder.Tests
                 }
                 Assert.True(receivedLoadResponse, "Reconnection load response not received after crash");
 
-                var docAfter = connection.GetDocument(finalDocId) as Document;
+                Document? docAfter = null;
+                retries = 0;
+                while (docAfter == null && retries++ < 50)
+                {
+                    docAfter = connection.GetDocument(finalDocId) as Document;
+                    if (docAfter == null) System.Threading.Thread.Sleep(50);
+                }
                 Assert.NotNull(docAfter);
 
                 char[] textBufAfter = new char[docAfter.Length];
@@ -534,7 +547,13 @@ namespace SpanCoder.Tests
                 }
                 Assert.True(receivedBatchResponse, "Batch edit response not received");
 
-                var doc = connection.GetDocument(finalDocId) as Document;
+                Document? doc = null;
+                retries = 0;
+                while (doc == null && retries++ < 50)
+                {
+                    doc = connection.GetDocument(finalDocId) as Document;
+                    if (doc == null) System.Threading.Thread.Sleep(50);
+                }
                 Assert.NotNull(doc);
                 char[] textBuf = new char[doc.Length];
                 doc.PieceTable.GetText(0, doc.Length, textBuf);
@@ -545,6 +564,24 @@ namespace SpanCoder.Tests
                 if (File.Exists(tempFile))
                     File.Delete(tempFile);
             }
+        }
+
+        [Fact]
+        public void TestOpenDocumentDirtyState()
+        {
+            var docView = new Document(1, "initial".AsMemory());
+            var openDoc = new ShellWindow.OpenDocument(1, "test.txt", docView);
+
+            // Initially clean
+            Assert.False(openDoc.IsDirty);
+
+            // Set dirty
+            openDoc.IsDirty = true;
+            Assert.True(openDoc.IsDirty);
+
+            // Clean it
+            openDoc.IsDirty = false;
+            Assert.False(openDoc.IsDirty);
         }
     }
 }

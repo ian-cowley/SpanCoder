@@ -10,8 +10,25 @@ using SpanCoder.Contracts;
 
 namespace SpanCoder.Shell
 {
+    public enum VimMode
+    {
+        Normal,
+        Insert
+    }
+
     public class TextEditorCanvas : Control
     {
+        // Vim Emulation State
+        private bool _vimEnabled = false;
+        private VimMode _vimMode = VimMode.Insert;
+        private string _pendingVimCommand = "";
+
+        public bool VimEnabled => _vimEnabled;
+        public VimMode VimMode => _vimMode;
+
+        public event Action? VimModeChanged;
+        public event Action? UndoRequested;
+        public event Action? RedoRequested;
         public static readonly StyledProperty<IDocumentView?> DocumentProperty =
             AvaloniaProperty.Register<TextEditorCanvas, IDocumentView?>(nameof(Document));
 
@@ -249,6 +266,20 @@ namespace SpanCoder.Shell
         public event Action? AutocompleteCommitRequested;
         public event Action? AutocompleteCancelRequested;
 
+        public class ContextMenuItem
+        {
+            public string Header { get; set; } = "";
+            public string CommandId { get; set; } = "";
+            public string ExtensionId { get; set; } = "";
+        }
+
+        public System.Collections.Generic.List<ContextMenuItem> ExtensionContextMenuItems { get; } = new();
+        public event Action<string>? ExtensionContextMenuItemClicked;
+
+        public event Action? CutRequested;
+        public event Action? CopyRequested;
+        public event Action? PasteRequested;
+
         static TextEditorCanvas()
         {
             AffectsRender<TextEditorCanvas>(DocumentProperty);
@@ -288,7 +319,27 @@ namespace SpanCoder.Shell
             _typeface = new Typeface(fontFamily);
             LineHeight = _fontSize + 6.0;
             _charWidth = 0.0;
+
+            bool wasVimEnabled = _vimEnabled;
+            _vimEnabled = SettingsManager.Get<bool>("editor.vimEnabled", false);
+            if (_vimEnabled != wasVimEnabled)
+            {
+                _vimMode = _vimEnabled ? VimMode.Normal : VimMode.Insert;
+                VimModeChanged?.Invoke();
+            }
+
             InvalidateVisual();
+        }
+
+        public void SetVimMode(VimMode mode)
+        {
+            if (!_vimEnabled) return;
+            if (_vimMode != mode)
+            {
+                _vimMode = mode;
+                InvalidateVisual();
+                VimModeChanged?.Invoke();
+            }
         }
 
         private void OnSettingChanged(string id)
@@ -920,6 +971,15 @@ namespace SpanCoder.Shell
                 return;
             }
 
+            if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+            {
+                var (clickLine, clickCol) = GetLineColFromPointer(pos);
+                MoveCaret(clickLine, clickCol);
+                ShowContextMenu(e);
+                e.Handled = true;
+                return;
+            }
+
             if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             {
                 bool isAltPressed = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
@@ -942,10 +1002,26 @@ namespace SpanCoder.Shell
                 {
                     _extraCarets.Clear();
                     int clickOffset = GetOffsetFromPointer(pos);
-                    _selectionStartOffset = clickOffset;
-                    _selectionEndOffset = clickOffset;
-                    _isDragging = true;
-                    MoveCaretToOffset(clickOffset);
+
+                    if (e.ClickCount == 3 && Document != null)
+                    {
+                        var (clickLine, _) = GetLineColFromPointer(pos);
+                        SelectLineAt(clickLine);
+                        _isDragging = true;
+                    }
+                    else if (e.ClickCount == 2 && Document != null)
+                    {
+                        var (clickLine, clickCol) = GetLineColFromPointer(pos);
+                        SelectWordAt(clickLine, clickCol);
+                        _isDragging = true;
+                    }
+                    else
+                    {
+                        _selectionStartOffset = clickOffset;
+                        _selectionEndOffset = clickOffset;
+                        _isDragging = true;
+                        MoveCaretToOffset(clickOffset);
+                    }
                     e.Handled = true;
                 }
             }
@@ -954,6 +1030,43 @@ namespace SpanCoder.Shell
         protected override void OnKeyDown(KeyEventArgs e)
         {
             LogHelper.Log($"[TextEditorCanvas] OnKeyDown: key={e.Key}, modifiers={e.KeyModifiers}, caretLine={CaretLine}, caretCol={CaretCol}, extraCaretsCount={_extraCarets.Count}");
+
+            if (_vimEnabled)
+            {
+                if (_vimMode == VimMode.Insert && e.Key == Key.Escape)
+                {
+                    if (CaretCol > 0)
+                    {
+                        MoveCaret(CaretLine, CaretCol - 1);
+                    }
+                    SetVimMode(VimMode.Normal);
+                    e.Handled = true;
+                    return;
+                }
+
+                if (_vimMode == VimMode.Normal)
+                {
+                    if (GhostText != null)
+                    {
+                        GhostText = null;
+                        GhostTextOffset = -1;
+                        InvalidateVisual();
+                    }
+
+                    bool handled = HandleVimNormalModeKey(e.Key, e.KeyModifiers);
+                    if (handled)
+                    {
+                        e.Handled = true;
+                        return;
+                    }
+                    else if (e.Key == Key.Back || e.Key == Key.Delete || e.Key == Key.Enter || e.Key == Key.Tab)
+                    {
+                        e.Handled = true;
+                        return;
+                    }
+                }
+            }
+
             if (e.Key == Key.LeftAlt || e.Key == Key.RightAlt)
             {
                 LogHelper.Log($"[TextEditorCanvas] Handling Alt key in OnKeyDown to prevent menu focus steal");
@@ -1257,10 +1370,12 @@ namespace SpanCoder.Shell
                             var editsList = new System.Collections.Generic.List<TextEdit>();
                             LogHelper.Log($"[TextEditorCanvas] OnKeyDown Key.Enter: generating batch edits for {_extraCarets.Count + 1} carets");
                             int mainOffset = GetCaretAbsoluteOffset();
-                            editsList.Add(new TextEdit { Offset = mainOffset, DeleteLength = 0, Text = "\n" });
+                            string mainWS = GetLeadingWhitespace(CaretLine, CaretCol);
+                            editsList.Add(new TextEdit { Offset = mainOffset, DeleteLength = 0, Text = "\n" + mainWS });
                             foreach (var extra in _extraCarets)
                             {
-                                editsList.Add(new TextEdit { Offset = extra.AbsoluteOffset, DeleteLength = 0, Text = "\n" });
+                                string extraWS = GetLeadingWhitespace(extra.Line, extra.Col);
+                                editsList.Add(new TextEdit { Offset = extra.AbsoluteOffset, DeleteLength = 0, Text = "\n" + extraWS });
                             }
                             LogHelper.Log($"[TextEditorCanvas] OnKeyDown Key.Enter: Invoking BatchEditReceived with {editsList.Count} edits");
                             BatchEditReceived?.Invoke(editsList.ToArray());
@@ -1268,7 +1383,8 @@ namespace SpanCoder.Shell
                         else
                         {
                             int offset = GetCaretAbsoluteOffset();
-                            TextInputReceived?.Invoke(offset, "\n");
+                            string mainWS = GetLeadingWhitespace(CaretLine, CaretCol);
+                            TextInputReceived?.Invoke(offset, "\n" + mainWS);
                         }
                         e.Handled = true;
                     }
@@ -1303,6 +1419,11 @@ namespace SpanCoder.Shell
 
         protected override void OnTextInput(TextInputEventArgs e)
         {
+            if (_vimEnabled && _vimMode == VimMode.Normal)
+            {
+                e.Handled = true;
+                return;
+            }
             base.OnTextInput(e);
             LogHelper.Log($"[TextEditorCanvas] OnTextInput: text='{e.Text}', mainCaretOffset={GetCaretAbsoluteOffset()}, extraCaretsCount={_extraCarets.Count}");
             if (GhostText != null)
@@ -1356,6 +1477,8 @@ namespace SpanCoder.Shell
             _hoverTimer?.Stop();
             _hoverTimer?.Start();
             MouseMovedOrLeft?.Invoke();
+
+            if (Document == null) return;
 
             if (_isDragging)
             {
@@ -1626,12 +1749,20 @@ namespace SpanCoder.Shell
             if (_caretVisible)
             {
                 var pen = new Pen(Brushes.LightGray, CaretThickness);
+                var blockBrush = new SolidColorBrush(Color.FromArgb(120, 211, 211, 211));
                 int caretVisibleIndex = _docToVisualLine.Length > CaretLine ? _docToVisualLine[CaretLine] : CaretLine;
                 if (caretVisibleIndex >= startVisibleIndex && caretVisibleIndex <= endVisibleIndex)
                 {
                     double caretX = gutterWidth + 10 + (CaretCol * CharWidth) - ScrollX;
                     double caretY = (caretVisibleIndex * LineHeight) - ScrollY;
-                    context.DrawLine(pen, new Point(caretX, caretY + 2), new Point(caretX, caretY + LineHeight - 2));
+                    if (_vimEnabled && _vimMode == VimMode.Normal)
+                    {
+                        context.FillRectangle(blockBrush, new Rect(caretX, caretY + 2, CharWidth, LineHeight - 4));
+                    }
+                    else
+                    {
+                        context.DrawLine(pen, new Point(caretX, caretY + 2), new Point(caretX, caretY + LineHeight - 2));
+                    }
                 }
                 foreach (var extra in _extraCarets)
                 {
@@ -1640,7 +1771,14 @@ namespace SpanCoder.Shell
                     {
                         double caretX = gutterWidth + 10 + (extra.Col * CharWidth) - ScrollX;
                         double caretY = (extraVisibleIndex * LineHeight) - ScrollY;
-                        context.DrawLine(pen, new Point(caretX, caretY + 2), new Point(caretX, caretY + LineHeight - 2));
+                        if (_vimEnabled && _vimMode == VimMode.Normal)
+                        {
+                            context.FillRectangle(blockBrush, new Rect(caretX, caretY + 2, CharWidth, LineHeight - 4));
+                        }
+                        else
+                        {
+                            context.DrawLine(pen, new Point(caretX, caretY + 2), new Point(caretX, caretY + LineHeight - 2));
+                        }
                     }
                 }
             }
@@ -1996,6 +2134,470 @@ namespace SpanCoder.Shell
 
             _extraCarets.Clear();
             _extraCarets.AddRange(uniqueCarets);
+        }
+
+        private string GetLeadingWhitespace(int lineIndex, int caretCol)
+        {
+            if (Document == null) return "";
+            var lineSpan = Document.GetLine(lineIndex, out _, out var rented);
+            int len = 0;
+            while (len < lineSpan.Length && len < caretCol && (lineSpan[len] == ' ' || lineSpan[len] == '\t'))
+            {
+                len++;
+            }
+            string ws = new string(lineSpan.Slice(0, len));
+            if (rented != null) System.Buffers.ArrayPool<char>.Shared.Return(rented);
+            return ws;
+        }
+
+        private int GetLineLength(int lineIndex)
+        {
+            if (Document == null) return 0;
+            long start = Document.GetLineStart(lineIndex);
+            long end = (lineIndex + 1 < Document.GetLineCount()) ? Document.GetLineStart(lineIndex + 1) : Document.Length;
+            int len = (int)(end - start);
+            var lineSpan = Document.GetLine(lineIndex, out _, out var rented);
+            int printableLen = len;
+            if (printableLen > 0 && lineSpan[printableLen - 1] == '\n') printableLen--;
+            if (printableLen > 0 && lineSpan[printableLen - 1] == '\r') printableLen--;
+            if (rented != null) ArrayPool<char>.Shared.Return(rented);
+            return printableLen;
+        }
+
+        private void VimMoveWord(bool forward)
+        {
+            if (Document == null) return;
+            int offset = GetCaretAbsoluteOffset();
+            if (forward)
+            {
+                if (offset >= Document.Length) return;
+                int lookahead = Math.Min(200, Document.Length - offset);
+                if (lookahead <= 0) return;
+                string text = Document.GetTextRange(offset, lookahead);
+                
+                int i = 0;
+                if (i < text.Length)
+                {
+                    char startChar = text[i];
+                    bool startWordClass = char.IsLetterOrDigit(startChar);
+                    while (i < text.Length && char.IsLetterOrDigit(text[i]) == startWordClass && !char.IsWhiteSpace(text[i]))
+                    {
+                        i++;
+                    }
+                    while (i < text.Length && char.IsWhiteSpace(text[i]))
+                    {
+                        i++;
+                    }
+                }
+                if (i > 0)
+                {
+                    MoveCaretToOffset(offset + i);
+                }
+            }
+            else
+            {
+                if (offset <= 0) return;
+                int lookbehind = Math.Min(200, offset);
+                string text = Document.GetTextRange(offset - lookbehind, lookbehind);
+                
+                int i = text.Length - 1;
+                while (i >= 0 && char.IsWhiteSpace(text[i]))
+                {
+                    i--;
+                }
+                if (i >= 0)
+                {
+                    char targetChar = text[i];
+                    bool targetWordClass = char.IsLetterOrDigit(targetChar);
+                    while (i >= 0 && char.IsLetterOrDigit(text[i]) == targetWordClass && !char.IsWhiteSpace(text[i]))
+                    {
+                        i--;
+                    }
+                    i++;
+                }
+                else
+                {
+                    i = 0;
+                }
+                int newOffset = offset - lookbehind + i;
+                if (newOffset != offset)
+                {
+                    MoveCaretToOffset(newOffset);
+                }
+            }
+        }
+
+        private void VimDeleteCurrentLine()
+        {
+            if (Document == null) return;
+            int lineCount = Document.GetLineCount();
+            if (lineCount <= 0) return;
+            
+            long start = Document.GetLineStart(CaretLine);
+            long end;
+            if (CaretLine + 1 < lineCount)
+            {
+                end = Document.GetLineStart(CaretLine + 1);
+            }
+            else
+            {
+                end = Document.Length;
+                if (start > 0)
+                {
+                    start--;
+                }
+            }
+            
+            int len = (int)(end - start);
+            if (len > 0)
+            {
+                TextDeleteReceived?.Invoke((int)start, len);
+                int newLine = Math.Max(0, Math.Min(CaretLine, Document.GetLineCount() - 1));
+                MoveCaret(newLine, 0);
+            }
+        }
+
+        private bool HandleVimNormalModeKey(Key key, KeyModifiers modifiers)
+        {
+            bool shiftPressed = (modifiers & KeyModifiers.Shift) != 0;
+            bool ctrlPressed = (modifiers & KeyModifiers.Control) != 0;
+
+            if (_pendingVimCommand == "d")
+            {
+                if (key == Key.D)
+                {
+                    VimDeleteCurrentLine();
+                    _pendingVimCommand = "";
+                    return true;
+                }
+                _pendingVimCommand = "";
+                return true;
+            }
+
+            if (_pendingVimCommand == "g")
+            {
+                if (key == Key.G && !shiftPressed)
+                {
+                    MoveCaret(0, 0);
+                    _pendingVimCommand = "";
+                    return true;
+                }
+                _pendingVimCommand = "";
+                return true;
+            }
+
+            switch (key)
+            {
+                case Key.Enter:
+                    {
+                        var (nl, nc) = GetNewCaretPosDown(CaretLine, CaretCol);
+                        MoveCaret(nl, nc);
+                        return true;
+                    }
+                case Key.H:
+                case Key.Left:
+                    {
+                        var (nl, nc) = GetNewCaretPosLeft(CaretLine, CaretCol, preventWrap: true);
+                        MoveCaret(nl, nc);
+                        return true;
+                    }
+                case Key.L:
+                case Key.Right:
+                    {
+                        var (nl, nc) = GetNewCaretPosRight(CaretLine, CaretCol, preventWrap: true);
+                        MoveCaret(nl, nc);
+                        return true;
+                    }
+                case Key.J:
+                case Key.Down:
+                    {
+                        var (nl, nc) = GetNewCaretPosDown(CaretLine, CaretCol);
+                        MoveCaret(nl, nc);
+                        return true;
+                    }
+                case Key.K:
+                case Key.Up:
+                    {
+                        var (nl, nc) = GetNewCaretPosUp(CaretLine, CaretCol);
+                        MoveCaret(nl, nc);
+                        return true;
+                    }
+
+                case Key.W:
+                    VimMoveWord(forward: true);
+                    return true;
+                case Key.B:
+                    VimMoveWord(forward: false);
+                    return true;
+
+                case Key.D0:
+                    if (!shiftPressed)
+                    {
+                        MoveCaret(CaretLine, 0);
+                        return true;
+                    }
+                    break;
+                case Key.D4:
+                    if (shiftPressed) // $
+                    {
+                        int len = GetLineLength(CaretLine);
+                        MoveCaret(CaretLine, len);
+                        return true;
+                    }
+                    break;
+
+                case Key.I:
+                    if (shiftPressed)
+                    {
+                        if (Document != null)
+                        {
+                            var lineSpan = Document.GetLine(CaretLine, out _, out var rented);
+                            int idx = 0;
+                            while (idx < lineSpan.Length && (lineSpan[idx] == ' ' || lineSpan[idx] == '\t'))
+                            {
+                                idx++;
+                            }
+                            if (rented != null) System.Buffers.ArrayPool<char>.Shared.Return(rented);
+                            MoveCaret(CaretLine, idx);
+                        }
+                        SetVimMode(VimMode.Insert);
+                    }
+                    else
+                    {
+                        SetVimMode(VimMode.Insert);
+                    }
+                    return true;
+
+                case Key.A:
+                    if (shiftPressed)
+                    {
+                        int len = GetLineLength(CaretLine);
+                        MoveCaret(CaretLine, len);
+                        SetVimMode(VimMode.Insert);
+                    }
+                    else
+                    {
+                        var (nl, nc) = GetNewCaretPosRight(CaretLine, CaretCol, preventWrap: true);
+                        MoveCaret(nl, nc);
+                        SetVimMode(VimMode.Insert);
+                    }
+                    return true;
+
+                case Key.O:
+                    if (shiftPressed)
+                    {
+                        MoveCaret(CaretLine, 0);
+                        int offset = GetCaretAbsoluteOffset();
+                        string ws = GetLeadingWhitespace(CaretLine, CaretCol);
+                        TextInputReceived?.Invoke(offset, ws + "\n");
+                        MoveCaret(CaretLine, ws.Length);
+                        SetVimMode(VimMode.Insert);
+                    }
+                    else
+                    {
+                        int len = GetLineLength(CaretLine);
+                        MoveCaret(CaretLine, len);
+                        int offset = GetCaretAbsoluteOffset();
+                        string ws = GetLeadingWhitespace(CaretLine, CaretCol);
+                        TextInputReceived?.Invoke(offset, "\n" + ws);
+                        SetVimMode(VimMode.Insert);
+                    }
+                    return true;
+
+                case Key.X:
+                    {
+                        int offset = GetCaretAbsoluteOffset();
+                        if (Document != null && offset < Document.Length)
+                        {
+                            TextDeleteReceived?.Invoke(offset, 1);
+                        }
+                        return true;
+                    }
+
+                case Key.D:
+                    _pendingVimCommand = "d";
+                    return true;
+
+                case Key.G:
+                    if (shiftPressed)
+                    {
+                        if (Document != null)
+                        {
+                            MoveCaret(Document.GetLineCount() - 1, 0);
+                        }
+                        return true;
+                    }
+                    else
+                    {
+                        _pendingVimCommand = "g";
+                        return true;
+                    }
+
+                case Key.U:
+                    if (ctrlPressed)
+                    {
+                        RedoRequested?.Invoke();
+                    }
+                    else
+                    {
+                        UndoRequested?.Invoke();
+                    }
+                    return true;
+
+                case Key.R:
+                    if (ctrlPressed)
+                    {
+                        RedoRequested?.Invoke();
+                        return true;
+                    }
+                    break;
+            }
+
+            return false;
+        }
+
+        private bool IsCaretOnWord()
+        {
+            if (Document == null) return false;
+            try
+            {
+                var lineSpan = Document.GetLine(CaretLine, out _, out var rented);
+                if (CaretCol < 0 || CaretCol >= lineSpan.Length)
+                {
+                    if (rented != null) System.Buffers.ArrayPool<char>.Shared.Return(rented);
+                    return false;
+                }
+                char c = lineSpan[CaretCol];
+                bool isWord = char.IsLetterOrDigit(c) || c == '_';
+                if (rented != null) System.Buffers.ArrayPool<char>.Shared.Return(rented);
+                return isWord;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public void SelectWordAt(int line, int col)
+        {
+            if (Document == null) return;
+            if (line < 0 || line >= Document.GetLineCount()) return;
+
+            var lineSpan = Document.GetLine(line, out _, out var rentedBuffer);
+            if (col < 0 || col > lineSpan.Length)
+            {
+                if (rentedBuffer != null) System.Buffers.ArrayPool<char>.Shared.Return(rentedBuffer);
+                return;
+            }
+
+            int targetCol = Math.Min(col, lineSpan.Length - 1);
+            if (targetCol >= 0)
+            {
+                char c = lineSpan[targetCol];
+                bool isWordChar = char.IsLetterOrDigit(c) || c == '_';
+
+                int startCol = targetCol;
+                int endCol = targetCol;
+
+                if (isWordChar)
+                {
+                    while (startCol > 0 && (char.IsLetterOrDigit(lineSpan[startCol - 1]) || lineSpan[startCol - 1] == '_'))
+                    {
+                        startCol--;
+                    }
+                    while (endCol < lineSpan.Length - 1 && (char.IsLetterOrDigit(lineSpan[endCol + 1]) || lineSpan[endCol + 1] == '_'))
+                    {
+                        endCol++;
+                    }
+                }
+                else if (char.IsWhiteSpace(c))
+                {
+                    while (startCol > 0 && char.IsWhiteSpace(lineSpan[startCol - 1]))
+                    {
+                        startCol--;
+                    }
+                    while (endCol < lineSpan.Length - 1 && char.IsWhiteSpace(lineSpan[endCol + 1]))
+                    {
+                        endCol++;
+                    }
+                }
+
+                long lineStart = Document.GetLineStart(line);
+                _selectionStartOffset = (int)lineStart + startCol;
+                _selectionEndOffset = (int)lineStart + endCol + 1;
+                MoveCaretToOffset(_selectionEndOffset);
+            }
+            if (rentedBuffer != null) System.Buffers.ArrayPool<char>.Shared.Return(rentedBuffer);
+        }
+
+        public void SelectLineAt(int line)
+        {
+            if (Document == null) return;
+            if (line < 0 || line >= Document.GetLineCount()) return;
+
+            long start = Document.GetLineStart(line);
+            long end = (line + 1 < Document.GetLineCount()) ? Document.GetLineStart(line + 1) : Document.Length;
+
+            _selectionStartOffset = (int)start;
+            _selectionEndOffset = (int)end;
+            MoveCaretToOffset(_selectionEndOffset);
+        }
+
+        private void ShowContextMenu(PointerPressedEventArgs e)
+        {
+            var contextMenu = new ContextMenu();
+            bool onWord = IsCaretOnWord();
+
+            // 1. Cut / Copy / Paste
+            var cutItem = new MenuItem { Header = "Cut", InputGesture = new KeyGesture(Key.X, KeyModifiers.Control) };
+            cutItem.Click += (s, ev) => CutRequested?.Invoke();
+            
+            var copyItem = new MenuItem { Header = "Copy", InputGesture = new KeyGesture(Key.C, KeyModifiers.Control) };
+            copyItem.Click += (s, ev) => CopyRequested?.Invoke();
+
+            var pasteItem = new MenuItem { Header = "Paste", InputGesture = new KeyGesture(Key.V, KeyModifiers.Control) };
+            pasteItem.Click += (s, ev) => PasteRequested?.Invoke();
+
+            contextMenu.Items.Add(cutItem);
+            contextMenu.Items.Add(copyItem);
+            contextMenu.Items.Add(pasteItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // 2. Go to Definition / Find References / Rename
+            var gotoDefItem = new MenuItem { Header = "Go to Definition", InputGesture = new KeyGesture(Key.F12), IsEnabled = onWord };
+            gotoDefItem.Click += (s, ev) => GotoDefinitionRequested?.Invoke(GetCaretAbsoluteOffset());
+            contextMenu.Items.Add(gotoDefItem);
+
+            var findRefsItem = new MenuItem { Header = "Find All References", InputGesture = new KeyGesture(Key.F12, KeyModifiers.Shift), IsEnabled = onWord };
+            findRefsItem.Click += (s, ev) => FindReferencesRequested?.Invoke(GetCaretAbsoluteOffset());
+            contextMenu.Items.Add(findRefsItem);
+
+            var renameItem = new MenuItem { Header = "Rename Symbol", InputGesture = new KeyGesture(Key.F2), IsEnabled = onWord };
+            renameItem.Click += (s, ev) => RenameRequested?.Invoke(GetCaretAbsoluteOffset());
+            contextMenu.Items.Add(renameItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // 3. Toggle Breakpoint
+            var toggleBpItem = new MenuItem { Header = "Toggle Breakpoint", InputGesture = new KeyGesture(Key.F9) };
+            toggleBpItem.Click += (s, ev) => ToggleBreakpoint(CaretLine + 1);
+            contextMenu.Items.Add(toggleBpItem);
+
+            // 4. Custom Extension Items
+            if (ExtensionContextMenuItems.Count > 0)
+            {
+                contextMenu.Items.Add(new Separator());
+                foreach (var item in ExtensionContextMenuItems)
+                {
+                    var extItem = new MenuItem { Header = item.Header };
+                    var localCommandId = item.CommandId;
+                    extItem.Click += (s, ev) => ExtensionContextMenuItemClicked?.Invoke(localCommandId);
+                    contextMenu.Items.Add(extItem);
+                }
+            }
+
+            contextMenu.Open(this);
         }
     }
 }

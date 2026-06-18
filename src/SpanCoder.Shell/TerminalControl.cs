@@ -72,13 +72,18 @@ namespace SpanCoder.Shell
                     Foreground = Brushes.LightGray
                 };
 
+                if (line == null) return tb;
+
                 // Bind text runs
                 void SyncRuns()
                 {
-                    tb.Inlines.Clear();
-                    foreach (var run in line.Runs)
+                    if (tb.Inlines != null)
                     {
-                        tb.Inlines.Add(new Avalonia.Controls.Documents.Run { Text = run.Text, Foreground = run.Brush });
+                        tb.Inlines.Clear();
+                        foreach (var run in line.Runs)
+                        {
+                            tb.Inlines.Add(new Avalonia.Controls.Documents.Run { Text = run.Text, Foreground = run.Brush });
+                        }
                     }
                 }
 

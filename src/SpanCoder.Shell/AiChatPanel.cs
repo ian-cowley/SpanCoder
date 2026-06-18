@@ -954,7 +954,7 @@ namespace SpanCoder.Shell
 
         private static void ParseInlineMarkdown(TextBlock textBlock, string text)
         {
-            if (string.IsNullOrEmpty(text))
+            if (string.IsNullOrEmpty(text) || textBlock.Inlines == null)
                 return;
 
             int i = 0;

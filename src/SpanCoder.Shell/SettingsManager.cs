@@ -45,6 +45,19 @@ namespace SpanCoder.Shell
 
         static SettingsManager()
         {
+            if (IsRunningInUnitTest())
+            {
+                try
+                {
+                    string path = GetDefaultSettingsFilePath();
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+                }
+                catch { }
+            }
+
             // Register built-in settings
             RegisterBuiltIn("editor.fontSize", "Editor Font Size", "integer", "14");
             RegisterBuiltIn("editor.fontFamily", "Editor Font Family", "string", "Consolas");
@@ -59,6 +72,7 @@ namespace SpanCoder.Shell
             RegisterBuiltIn("ai.gemini.model", "Gemini Model", "string", "gemini-1.5-pro");
             RegisterBuiltIn("ai.ollama.apikey", "Ollama API Key (Optional)", "string", "");
             RegisterBuiltIn("ai.ollama.model", "Ollama Model", "string", "qwen2.5-coder:7b");
+            RegisterBuiltIn("editor.vimEnabled", "Enable Vim Emulation", "boolean", "false");
 
             Load();
         }

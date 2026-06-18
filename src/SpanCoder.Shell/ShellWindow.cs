@@ -24,6 +24,7 @@ namespace SpanCoder.Shell
     {
         private EditorPane _activePane = null!;
         private readonly List<EditorPane> _editorPanes = new();
+        private readonly List<TextEditorCanvas.ContextMenuItem> _extensionContextMenuItems = new();
         private Grid _editorSplitContainer = null!;
 
         private TextEditorCanvas _canvas => _activePane.Canvas;
@@ -1079,6 +1080,12 @@ namespace SpanCoder.Shell
         {
             SettingsManager.UnregisterExtensionSettings(extensionId);
 
+            _extensionContextMenuItems.RemoveAll(x => x.ExtensionId == extensionId);
+            foreach (var pane in _editorPanes)
+            {
+                pane.Canvas.ExtensionContextMenuItems.RemoveAll(x => x.ExtensionId == extensionId);
+            }
+
             // 1. Remove UI Controls
             if (_extensionUiElements.TryGetValue(extensionId, out var controls))
             {
@@ -1148,6 +1155,24 @@ namespace SpanCoder.Shell
         {
             var parts = menuPath.Split('/');
             if (parts.Length == 0) return;
+
+            if (parts[0] == "EditorContextMenu")
+            {
+                var label = parts.Length > 1 ? parts[1] : commandId;
+                var item = new TextEditorCanvas.ContextMenuItem
+                {
+                    Header = label,
+                    CommandId = commandId,
+                    ExtensionId = extensionId
+                };
+                _extensionContextMenuItems.Add(item);
+
+                foreach (var pane in _editorPanes)
+                {
+                    pane.Canvas.ExtensionContextMenuItems.Add(item);
+                }
+                return;
+            }
 
             ItemsControl currentParent = _mainMenu;
             MenuItem? currentItem = null;
@@ -1267,7 +1292,11 @@ namespace SpanCoder.Shell
             public ActionCommand(Action action) => _action = action;
             public bool CanExecute(object? parameter) => true;
             public void Execute(object? parameter) => _action();
-            public event EventHandler? CanExecuteChanged;
+            public event EventHandler? CanExecuteChanged
+            {
+                add { }
+                remove { }
+            }
         }
 
         private void OnEngineMessage(byte[] payload)
@@ -1319,6 +1348,7 @@ namespace SpanCoder.Shell
                                     {
                                         var paneDoc = pane.OpenDocuments.First(d => d.Id == docId);
                                         paneDoc.Document = doc;
+                                        paneDoc.IsDirty = true;
                                         
                                         if (pane.ActiveDocument == paneDoc)
                                         {
@@ -1331,6 +1361,7 @@ namespace SpanCoder.Shell
                                                 pane.Canvas.AdjustCaret(offset, addedLength, deletedLength);
                                             }
                                         }
+                                        RebuildTabsUI(pane);
                                     }
                                 }
 
@@ -1454,6 +1485,7 @@ namespace SpanCoder.Shell
                                 {
                                     var paneDoc = pane.OpenDocuments.First(d => d.Id == docId);
                                     paneDoc.Document = doc;
+                                    paneDoc.IsDirty = true;
                                     
                                     if (pane.ActiveDocument == paneDoc)
                                     {
@@ -1467,6 +1499,7 @@ namespace SpanCoder.Shell
                                             pane.Canvas.AdjustCaretsForBatch(edits);
                                         }
                                     }
+                                    RebuildTabsUI(pane);
                                 }
                                 UpdateStatusBar();
                                 UpdateInlayHintsAndCodeLens();
@@ -1498,7 +1531,13 @@ namespace SpanCoder.Shell
                 startupStr = $" | Startup: {_startupStopwatch.ElapsedMilliseconds}ms";
             }
 
-            _statusBar.Text = $"{_currentFilePath} | Line: {_canvas.CaretLine + 1}, Col: {_canvas.CaretCol + 1} | Total Lines: {_canvas.Document.GetLineCount()}{startupStr}";
+            string vimStr = "";
+            if (_canvas.VimEnabled)
+            {
+                vimStr = _canvas.VimMode == VimMode.Normal ? " | [NORMAL]" : " | [INSERT]";
+            }
+
+            _statusBar.Text = $"{_currentFilePath} | Line: {_canvas.CaretLine + 1}, Col: {_canvas.CaretCol + 1} | Total Lines: {_canvas.Document.GetLineCount()}{vimStr}{startupStr}";
         }
 
         private void OnCommandInvoked(string commandId)
@@ -1726,6 +1765,19 @@ namespace SpanCoder.Shell
             window.SaveFile();
         }
 
+        [Command("Edit.ToggleVim", "Toggle Vim Emulation", "Edit", "Ctrl+Alt+V")]
+        [MenuItem("Edit.ToggleVim", "Tools/Toggle Vim Emulation", 80)]
+        public static void ToggleVimCommand(ShellWindow window)
+        {
+            window.ToggleVim();
+        }
+
+        public void ToggleVim()
+        {
+            bool current = SettingsManager.Get<bool>("editor.vimEnabled", false);
+            SettingsManager.Set("editor.vimEnabled", (!current).ToString().ToLower());
+        }
+
         [Command("File.Settings", "Options/Settings...", "File", "Ctrl+,")]
         [MenuItem("File.Settings", "Tools/Options", 90)]
         public static void SettingsCommand(ShellWindow window)
@@ -1847,6 +1899,8 @@ namespace SpanCoder.Shell
                 {
                     string text = GetDocumentText(_activeDocument.Document);
                     System.IO.File.WriteAllText(_activeDocument.FilePath, text);
+                    _activeDocument.IsDirty = false;
+                    RebuildTabsUI(_activePane);
                     _statusBar.Text = $"File saved: {_activeDocument.FilePath}";
                     _ = RefreshGitStatusAsync();
                     RunLiveUnitTests();
@@ -1858,8 +1912,33 @@ namespace SpanCoder.Shell
             }
         }
 
-        private void CloseDocument(OpenDocument docToClose)
+        private async void CloseDocument(OpenDocument docToClose)
         {
+            if (docToClose.IsDirty)
+            {
+                var dialog = new SaveChangesDialog(new List<string> { System.IO.Path.GetFileName(docToClose.FilePath) });
+                await dialog.ShowDialog(this);
+
+                if (dialog.Result == SaveChangesDialog.DialogResult.Save)
+                {
+                    try
+                    {
+                        string text = GetDocumentText(docToClose.Document);
+                        System.IO.File.WriteAllText(docToClose.FilePath, text);
+                        docToClose.IsDirty = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        _statusBar.Text = $"Failed to save file: {ex.Message}";
+                        return;
+                    }
+                }
+                else if (dialog.Result == SaveChangesDialog.DialogResult.Cancel)
+                {
+                    return;
+                }
+            }
+
             _openDocuments.Remove(docToClose);
 
             if (_activeDocument == docToClose)
@@ -1910,7 +1989,7 @@ namespace SpanCoder.Shell
                 var tabContent = new StackPanel { Orientation = Orientation.Horizontal };
                 var nameLabel = new TextBlock
                 {
-                    Text = System.IO.Path.GetFileName(doc.FilePath),
+                    Text = System.IO.Path.GetFileName(doc.FilePath) + (doc.IsDirty ? "*" : ""),
                     Foreground = doc == pane.ActiveDocument ? Brushes.White : Brushes.Gray,
                     VerticalAlignment = VerticalAlignment.Center,
                     FontSize = 12
@@ -2180,6 +2259,7 @@ namespace SpanCoder.Shell
             };
 
             canvas.CaretMoved += UpdateStatusBar;
+            canvas.VimModeChanged += UpdateStatusBar;
 
             canvas.AutocompleteRequested += (offset) =>
             {
@@ -2246,6 +2326,16 @@ namespace SpanCoder.Shell
             canvas.AutocompleteDownRequested += OnAutocompleteDown;
             canvas.AutocompleteCommitRequested += OnAutocompleteCommit;
             canvas.AutocompleteCancelRequested += HideAutocomplete;
+
+            canvas.CutRequested += ExecuteCut;
+            canvas.CopyRequested += ExecuteCopy;
+            canvas.PasteRequested += ExecutePaste;
+            canvas.ExtensionContextMenuItemClicked += OnCommandInvoked;
+
+            foreach (var item in _extensionContextMenuItems)
+            {
+                canvas.ExtensionContextMenuItems.Add(item);
+            }
         }
 
         [Command("File.OpenSolution", "Open Solution", "File", "Ctrl+Shift+L")]
@@ -2481,12 +2571,15 @@ namespace SpanCoder.Shell
         public async void ExecuteCut()
         {
             if (_canvas.Document == null || _engine == null) return;
+            if (_canvas.VimEnabled && _canvas.VimMode == VimMode.Normal) return;
+            var clipboard = Clipboard;
+            if (clipboard == null) return;
             string text = _canvas.GetSelectedText(out int start, out int len);
             if (len > 0)
             {
                 try
                 {
-                    await Clipboard.SetTextAsync(text);
+                    await clipboard.SetTextAsync(text);
                 }
                 catch (Exception ex)
                 {
@@ -2502,12 +2595,14 @@ namespace SpanCoder.Shell
         public async void ExecuteCopy()
         {
             if (_canvas.Document == null) return;
+            var clipboard = Clipboard;
+            if (clipboard == null) return;
             string text = _canvas.GetSelectedText(out int start, out int len);
             if (len > 0)
             {
                 try
                 {
-                    await Clipboard.SetTextAsync(text);
+                    await clipboard.SetTextAsync(text);
                 }
                 catch (Exception ex)
                 {
@@ -2519,9 +2614,12 @@ namespace SpanCoder.Shell
         public async void ExecutePaste()
         {
             if (_canvas.Document == null || _engine == null) return;
+            if (_canvas.VimEnabled && _canvas.VimMode == VimMode.Normal) return;
+            var clipboard = Clipboard;
+            if (clipboard == null) return;
             try
             {
-                string? text = await Clipboard.GetTextAsync();
+                string? text = await clipboard.GetTextAsync();
                 if (!string.IsNullOrEmpty(text))
                 {
                     bool hasSel = _canvas.HasSelection(out int start, out int len);
@@ -2960,11 +3058,46 @@ namespace SpanCoder.Shell
 
         private bool _bypassClosingCheck = false;
 
-        protected override void OnClosing(WindowClosingEventArgs e)
+        protected override async void OnClosing(WindowClosingEventArgs e)
         {
             if (_bypassClosingCheck)
             {
                 base.OnClosing(e);
+                return;
+            }
+
+            var dirtyDocs = _editorPanes.SelectMany(p => p.OpenDocuments).Where(d => d.IsDirty).ToList();
+            if (dirtyDocs.Count > 0)
+            {
+                e.Cancel = true; // Abort immediate close
+
+                var fileNames = System.Linq.Enumerable.ToList(System.Linq.Enumerable.Select(dirtyDocs, d => System.IO.Path.GetFileName(d.FilePath)));
+                var dialog = new SaveChangesDialog(fileNames);
+                await dialog.ShowDialog(this);
+
+                if (dialog.Result == SaveChangesDialog.DialogResult.Save)
+                {
+                    foreach (var doc in dirtyDocs)
+                    {
+                        try
+                        {
+                            string text = GetDocumentText(doc.Document);
+                            System.IO.File.WriteAllText(doc.FilePath, text);
+                            doc.IsDirty = false;
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[Shell] Error saving {doc.FilePath} on window close: {ex.Message}");
+                        }
+                    }
+                    _bypassClosingCheck = true;
+                    Close();
+                }
+                else if (dialog.Result == SaveChangesDialog.DialogResult.DontSave)
+                {
+                    _bypassClosingCheck = true;
+                    Close();
+                }
                 return;
             }
 
@@ -3114,7 +3247,7 @@ namespace SpanCoder.Shell
                             Content = stackPanel
                         };
                         
-                        warningWindow.ShowDialog(this).ContinueWith(t => 
+                        _ = warningWindow.ShowDialog(this).ContinueWith(t => 
                         {
                             Dispatcher.UIThread.Post(() => 
                             {
@@ -3136,6 +3269,7 @@ namespace SpanCoder.Shell
             public int CaretCol { get; set; }
             public double ScrollX { get; set; }
             public double ScrollY { get; set; }
+            public bool IsDirty { get; set; }
 
             public OpenDocument(int id, string filePath, IDocumentView doc)
             {

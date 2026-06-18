@@ -42,8 +42,8 @@ namespace SpanCoder.Tests
                     col = Math.Max(0, col);
                     
                     var field = typeof(TextEditorCanvas).GetField("_extraCarets", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                    var list = (List<ExtraCaret>)field.GetValue(this);
-                    list.Add(new ExtraCaret
+                    var list = (List<ExtraCaret>?)field?.GetValue(this);
+                    list?.Add(new ExtraCaret
                     {
                         Line = line,
                         Col = col,
@@ -160,7 +160,7 @@ namespace SpanCoder.Tests
             canvas.MoveCaret(0, 2);
             canvas.SetBlockDraggingState(0, 2);
 
-            TextEdit[] receivedEdits = null;
+            TextEdit[]? receivedEdits = null;
             canvas.BatchEditReceived += (edits) =>
             {
                 receivedEdits = edits;
@@ -256,7 +256,7 @@ namespace SpanCoder.Tests
             canvas.MoveCaret(0, 2);
             canvas.SetBlockDraggingState(0, 2);
 
-            TextEdit[] receivedEdits = null;
+            TextEdit[]? receivedEdits = null;
             canvas.BatchEditReceived += (edits) =>
             {
                 receivedEdits = edits;
@@ -302,6 +302,34 @@ namespace SpanCoder.Tests
             // Extra caret 2 Delete (Line 2 Col 2 -> offset 16)
             Assert.Equal(16, receivedEdits[2].Offset);
             Assert.Equal(1, receivedEdits[2].DeleteLength);
+        }
+
+        [AvaloniaFact]
+        public void TestAutoIndentationOnEnter()
+        {
+            var canvas = new TestCanvas();
+            var doc = new Document(1, "    Indented line\n  Another indent".AsMemory());
+            canvas.Document = doc;
+
+            // Move caret to end of first line (offset 17, Col 17)
+            canvas.MoveCaret(0, 17);
+
+            string? textReceived = null;
+            canvas.TextInputReceived += (offset, text) =>
+            {
+                textReceived = text;
+            };
+
+            // Trigger Enter
+            var enterKeyArgs = new KeyEventArgs
+            {
+                Key = Key.Enter,
+                Route = RoutingStrategies.Bubble
+            };
+            canvas.TriggerKeyDown(enterKeyArgs);
+
+            // Expect newline + 4 spaces of indentation
+            Assert.Equal("\n    ", textReceived);
         }
     }
 }

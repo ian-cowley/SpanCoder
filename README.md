@@ -368,8 +368,10 @@ Interactive debugging features are integrated into the main shell via several de
 
 ### Phase 2: Advanced Editing Features
 * [x] **Split Editor Layouts**: Support vertical and horizontal workspace splitting to edit multiple files or different views of the same file concurrently.
-* [ ] **Vim Emulation Mode**: Implement a zero-dependency, out-of-process modal keyboard layout adapter.
+* [x] **Vim Emulation Mode**: Implement a zero-dependency, out-of-process modal keyboard layout adapter.
 * [x] **Structural Code Folding**: Add folding support for classes, methods, and blocks, using background AST parsers.
+* [x] **Unsaved Changes Indicators & Dialogs**: Added document dirty state tracking, tab asterisk indicator, and custom modal close confirmation dialogs.
+* [x] **Context-Aware Right-Click Menu & Selection**: Added right-click context menu (Cut/Copy/Paste, Breakpoint, Go to Definition, etc.), custom extension item support, and double/triple click selection actions.
 
 ### Phase 3: Remote Development & Collaboration
 * [ ] **Remote Engine Host**: Allow `SpanCoder.App` to run locally while connecting to a remote `SpanCoder.Engine` daemon running on a Linux server or in a Docker DevContainer.

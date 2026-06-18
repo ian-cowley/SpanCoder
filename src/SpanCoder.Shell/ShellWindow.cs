@@ -1783,6 +1783,27 @@ namespace SpanCoder.Shell
 
                                 UpdateStatusBar();
                                 UpdateInlayHintsAndCodeLens();
+
+                                // Refresh any visible Git Diff view for this file in real-time
+                                if (!string.IsNullOrEmpty(_fileTree.RootPath))
+                                {
+                                    string baseDir = Directory.Exists(_fileTree.RootPath) ? _fileTree.RootPath : Path.GetDirectoryName(_fileTree.RootPath) ?? "";
+                                    string relPath = Path.GetRelativePath(baseDir, doc.FilePath).Replace("\\", "/");
+                                    string diffUrl = $"gitdiff://{relPath}";
+
+                                    foreach (var pane in _editorPanes)
+                                    {
+                                        if (pane.ActiveDocument != null && pane.ActiveDocument.FilePath.Equals(diffUrl, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            var gitDiffCtrl = pane.EditorGrid.Children.OfType<GitDiffControl>().FirstOrDefault();
+                                            if (gitDiffCtrl != null)
+                                            {
+                                                RefreshGitDiffControl(gitDiffCtrl, relPath);
+                                            }
+                                        }
+                                    }
+                                }
+
                                 RequestLspFoldingRanges(docId);
                             }
                         }
@@ -4353,7 +4374,13 @@ namespace SpanCoder.Shell
                 await RefreshGitStatusAsync();
             });
 
-            // Load contents asynchronously
+            RefreshGitDiffControl(control, relativePath);
+
+            return control;
+        }
+
+        private void RefreshGitDiffControl(GitDiffControl control, string relativePath)
+        {
             Task.Run(async () =>
             {
                 try
@@ -4364,8 +4391,11 @@ namespace SpanCoder.Shell
                     string fullPath = Path.Combine(baseDir, relativePath);
                     string localContent = "";
 
-                    // If open in active/any pane, get it from memory to reflect unsaved edits
-                    var openDoc = _openDocuments.FirstOrDefault(d => d.FilePath.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
+                    string normalizedFullPath = Path.GetFullPath(fullPath);
+                    var openDoc = _editorPanes.SelectMany(p => p.OpenDocuments)
+                        .Where(d => !d.FilePath.StartsWith("gitdiff://") && !d.FilePath.StartsWith("extension://"))
+                        .FirstOrDefault(d => Path.GetFullPath(d.FilePath).Equals(normalizedFullPath, StringComparison.OrdinalIgnoreCase));
+
                     if (openDoc != null && openDoc.Document != null)
                     {
                         localContent = GetDocumentText(openDoc.Document);
@@ -4382,11 +4412,9 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ShellWindow] Failed to load diff for {relativePath}: {ex.Message}");
+                    Console.WriteLine($"[ShellWindow] Failed to load/refresh diff for {relativePath}: {ex.Message}");
                 }
             });
-
-            return control;
         }
 
         internal Control? CreateExtensionDetailsView(string extId)

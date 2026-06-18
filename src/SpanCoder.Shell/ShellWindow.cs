@@ -3281,10 +3281,42 @@ namespace SpanCoder.Shell
             {
                 UpdateStatusBarText("AI: Checking local Ollama...");
 
-                var response = await client.GetAsync("http://127.0.0.1:11434/api/tags");
-                if (!response.IsSuccessStatusCode)
+                System.Net.Http.HttpResponseMessage? response = null;
+                try
                 {
-                    Console.WriteLine($"[ShellWindow] Ollama api/tags returned non-success: {response.StatusCode} - {response.ReasonPhrase}");
+                    response = await client.GetAsync("http://127.0.0.1:11434/api/tags");
+                }
+                catch (System.Net.Http.HttpRequestException)
+                {
+                    // Ollama server is not running. Let's try to start it!
+                    UpdateStatusBarText("AI: Starting local Ollama service...");
+                    try
+                    {
+                        var startInfo = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "ollama",
+                            Arguments = "serve",
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        };
+                        System.Diagnostics.Process.Start(startInfo);
+                        
+                        // Wait a few seconds for the service to start
+                        await Task.Delay(3000);
+                        
+                        // Try querying tags again
+                        response = await client.GetAsync("http://127.0.0.1:11434/api/tags");
+                    }
+                    catch (Exception procEx)
+                    {
+                        Console.WriteLine($"[ShellWindow] Failed to launch 'ollama serve': {procEx.Message}");
+                        throw; // rethrow to be caught by outer catch block
+                    }
+                }
+
+                if (response == null || !response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[ShellWindow] Ollama api/tags returned non-success: {(response != null ? response.StatusCode.ToString() : "null")}");
                     UpdateStatusBarText("AI Offline: Local Ollama returned error.");
                     return;
                 }

@@ -22,9 +22,23 @@ namespace SpanCoder.Shell
 {
     public class ShellWindow : Window
     {
-        private TextEditorCanvas _canvas = null!;
-        private ScrollBar _vScroll = null!;
-        private ScrollBar _hScroll = null!;
+        private EditorPane _activePane = null!;
+        private readonly List<EditorPane> _editorPanes = new();
+        private Grid _editorSplitContainer = null!;
+
+        private TextEditorCanvas _canvas => _activePane.Canvas;
+        private ScrollBar _vScroll => _activePane.VScroll;
+        private ScrollBar _hScroll => _activePane.HScroll;
+        private StackPanel _tabsContainer => _activePane.TabsContainer;
+        private List<OpenDocument> _openDocuments => _activePane.OpenDocuments;
+        private OpenDocument? _activeDocument
+        {
+            get => _activePane.ActiveDocument;
+            set => _activePane.ActiveDocument = value;
+        }
+
+        public TextEditorCanvas ActiveCanvas => _canvas;
+
         private TextBlock _statusBar = null!;
         
         private Border _debugToolbar = null!;
@@ -54,9 +68,6 @@ namespace SpanCoder.Shell
         private readonly List<CommandDescriptor> _extensionCommands = new();
         private CommandPalette _commandPalette = null!;
         
-        private readonly List<OpenDocument> _openDocuments = new();
-        private OpenDocument? _activeDocument;
-        private StackPanel _tabsContainer = null!;
         private SidebarFileTree _fileTree = null!;
 
         private Border _autocompleteBorder = null!;
@@ -658,41 +669,24 @@ namespace SpanCoder.Shell
             workspaceGrid.Children.Add(splitter);
             Grid.SetColumn(splitter, 1);
 
-            // 2.3. Editor Pane (Tabs + Editor Canvas)
+            // 2.3. Editor Pane (Tabs + Editor Canvas Container)
             var editorPane = new Grid();
-            editorPane.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Row 0: Tab Bar
-            editorPane.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Row 1: Editor Grid
-            editorPane.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Row 2: Bottom Splitter
-            editorPane.RowDefinitions.Add(new RowDefinition { Height = new GridLength(180, GridUnitType.Pixel) }); // Row 3: Bottom Panel
+            editorPane.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Row 0: Editor Split Container
+            editorPane.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Row 1: Bottom Splitter
+            editorPane.RowDefinitions.Add(new RowDefinition { Height = new GridLength(180, GridUnitType.Pixel) }); // Row 2: Bottom Panel
 
-            // Tab Bar
-            var tabScroll = new ScrollViewer
-            {
-                HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-                Height = 32,
-                Background = new SolidColorBrush(Color.Parse("#252525"))
-            };
-            _tabsContainer = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Margin = new Thickness(4, 4, 4, 0)
-            };
-            tabScroll.Content = _tabsContainer;
-            editorPane.Children.Add(tabScroll);
-            Grid.SetRow(tabScroll, 0);
+            _editorSplitContainer = new Grid();
+            editorPane.Children.Add(_editorSplitContainer);
+            Grid.SetRow(_editorSplitContainer, 0);
 
-            // Editor Grid
-            var editorGrid = new Grid();
-            editorGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Canvas
-            editorGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Scrollbar V
-            editorGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Canvas / Scrollbar V
-            editorGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Scrollbar H
+            // Initial Editor Pane
+            var initialPane = new EditorPane(this);
+            _editorPanes.Add(initialPane);
+            _activePane = initialPane;
 
-            _canvas = new TextEditorCanvas();
-            editorGrid.Children.Add(_canvas);
-            Grid.SetRow(_canvas, 0);
-            Grid.SetColumn(_canvas, 0);
+            _editorSplitContainer.Children.Add(initialPane);
+            Grid.SetRow(initialPane, 0);
+            Grid.SetColumn(initialPane, 0);
 
             // Autocomplete Overlay
             _autocompleteList = new ListBox
@@ -725,7 +719,7 @@ namespace SpanCoder.Shell
                 ZIndex = 100
             };
 
-            editorGrid.Children.Add(_autocompleteBorder);
+            initialPane.EditorGrid.Children.Add(_autocompleteBorder);
             Grid.SetRow(_autocompleteBorder, 0);
             Grid.SetColumn(_autocompleteBorder, 0);
 
@@ -752,7 +746,7 @@ namespace SpanCoder.Shell
                 ZIndex = 101
             };
 
-            editorGrid.Children.Add(_hoverBorder);
+            initialPane.EditorGrid.Children.Add(_hoverBorder);
             Grid.SetRow(_hoverBorder, 0);
             Grid.SetColumn(_hoverBorder, 0);
 
@@ -791,32 +785,11 @@ namespace SpanCoder.Shell
                 ZIndex = 102
             };
 
-            editorGrid.Children.Add(_debugToolbar);
+            initialPane.EditorGrid.Children.Add(_debugToolbar);
             Grid.SetRow(_debugToolbar, 0);
             Grid.SetColumn(_debugToolbar, 0);
 
-            _vScroll = new ScrollBar
-            {
-                Orientation = Orientation.Vertical,
-                Width = 16
-            };
-            editorGrid.Children.Add(_vScroll);
-            Grid.SetRow(_vScroll, 0);
-            Grid.SetColumn(_vScroll, 1);
-
-            _hScroll = new ScrollBar
-            {
-                Orientation = Orientation.Horizontal,
-                Height = 16
-            };
-            editorGrid.Children.Add(_hScroll);
-            Grid.SetRow(_hScroll, 1);
-            Grid.SetColumn(_hScroll, 0);
-
-            editorPane.Children.Add(editorGrid);
-            Grid.SetRow(editorGrid, 1);
-
-            // Row 2: Bottom Splitter
+            // Row 1: Bottom Splitter
             var bottomSplitter = new GridSplitter
             {
                 Height = 4,
@@ -825,7 +798,7 @@ namespace SpanCoder.Shell
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
             editorPane.Children.Add(bottomSplitter);
-            Grid.SetRow(bottomSplitter, 2);
+            Grid.SetRow(bottomSplitter, 1);
 
             // Row 3: Bottom Panel TabControl
             var bottomTabControl = new TabControl
@@ -869,7 +842,7 @@ namespace SpanCoder.Shell
             bottomTabControl.Items.Add(perfTab);
 
             editorPane.Children.Add(bottomTabControl);
-            Grid.SetRow(bottomTabControl, 3);
+            Grid.SetRow(bottomTabControl, 2);
 
             // Start the PTY process
             _terminalPty = new PtyHost();
@@ -910,119 +883,8 @@ namespace SpanCoder.Shell
 
             Content = mainGrid;
 
-            // Wire Up Canvas Scrolling & Events
-            _canvas.ScrollRequested += (dx, dy) =>
-            {
-                if (dy != 0 && _vScroll.IsEnabled)
-                {
-                    double newV = Math.Max(0, Math.Min(_vScroll.Value + dy, _vScroll.Maximum));
-                    _vScroll.Value = newV;
-                    _canvas.ScrollY = newV;
-                }
-                if (dx != 0 && _hScroll.IsEnabled)
-                {
-                    double newV = Math.Max(0, Math.Min(_hScroll.Value + dx, _hScroll.Maximum));
-                    _hScroll.Value = newV;
-                    _canvas.ScrollX = newV;
-                }
-                _canvas.InvalidateVisual();
-            };
-
-            _vScroll.Scroll += (s, e) =>
-            {
-                _canvas.ScrollY = e.NewValue;
-                _canvas.InvalidateVisual();
-            };
-
-            _hScroll.Scroll += (s, e) =>
-            {
-                _canvas.ScrollX = e.NewValue;
-                _canvas.InvalidateVisual();
-            };
-
-            _canvas.TextInputReceived += (offset, text) =>
-            {
-                if (_canvas.Document == null || _engine == null) return;
-                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + text.Length * 2];
-                BinaryMessageSerializer.WriteInsertText(buffer, _canvas.Document.Id, offset, text);
-                _engine.Send(buffer);
-            };
-
-            _canvas.TextDeleteReceived += (offset, len) =>
-            {
-                if (_canvas.Document == null || _engine == null) return;
-                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4];
-                BinaryMessageSerializer.WriteDeleteText(buffer, _canvas.Document.Id, offset, len);
-                _engine.Send(buffer);
-            };
-
-            _canvas.CaretMoved += UpdateStatusBar;
-
-            _canvas.AutocompleteRequested += (offset) =>
-            {
-                if (_canvas.Document == null || _engine == null) return;
-                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
-                BinaryMessageSerializer.WriteAutocompleteRequest(buffer, _canvas.Document.Id, offset);
-                _engine.Send(buffer);
-            };
-
-            _canvas.HoverRequested += (offset, x, y) =>
-            {
-                if (_canvas.Document == null || _engine == null) return;
-                _lastHoverMouseX = x;
-                _lastHoverMouseY = y;
-                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
-                BinaryMessageSerializer.WriteHoverRequest(buffer, _canvas.Document.Id, offset);
-                _engine.Send(buffer);
-            };
-
-            _canvas.GotoDefinitionRequested += (offset) =>
-            {
-                if (_canvas.Document == null || _engine == null) return;
-                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
-                BinaryMessageSerializer.WriteGotoDefinitionRequest(buffer, _canvas.Document.Id, offset);
-                _engine.Send(buffer);
-            };
-
-            _canvas.FindReferencesRequested += (offset) =>
-            {
-                if (_canvas.Document == null || _engine == null) return;
-                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
-                BinaryMessageSerializer.WriteFindReferencesRequest(buffer, _canvas.Document.Id, offset);
-                _engine.Send(buffer);
-            };
-
-            _canvas.RenameRequested += async (offset) =>
-            {
-                if (_canvas.Document == null || _engine == null) return;
-                string word = GetWordAtCaret();
-                if (string.IsNullOrEmpty(word)) return;
-
-                var dialog = new RenameDialog(word);
-                await dialog.ShowDialog(this);
-                if (!string.IsNullOrEmpty(dialog.Result) && dialog.Result != word)
-                {
-                    byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + dialog.Result.Length * 2];
-                    BinaryMessageSerializer.WriteRenameRequest(buffer, _canvas.Document.Id, offset, dialog.Result);
-                    _engine.Send(buffer);
-                }
-            };
-
-            _canvas.MouseMovedOrLeft += HideHover;
-
-            _canvas.BreakpointsChanged += (bps) =>
-            {
-                _debugBreakpointsList.ItemsSource = bps.Select(bp => $"Line {bp}").ToList();
-                if (_isDebugging)
-                {
-                    SendBreakpointsToEngine();
-                }
-            };
-
-            _canvas.AutocompleteUpRequested += OnAutocompleteUp;
-            _canvas.AutocompleteDownRequested += OnAutocompleteDown;
-            _canvas.AutocompleteCommitRequested += OnAutocompleteCommit;
-            _canvas.AutocompleteCancelRequested += HideAutocomplete;
+            // Wire initial canvas events
+            WireCanvasEvents(initialPane);
 
             this.LayoutUpdated += (s, e) => UpdateScrollbars();
 
@@ -1389,40 +1251,50 @@ namespace SpanCoder.Shell
                             var doc = _engine.GetDocument(docId);
                             if (doc != null)
                             {
-                                var openDoc = _openDocuments.FirstOrDefault(d => d.Id == docId);
-                                if (openDoc == null)
+                                var panesWithDoc = _editorPanes.Where(p => p.OpenDocuments.Any(d => d.Id == docId)).ToList();
+                                
+                                if (panesWithDoc.Count == 0)
                                 {
-                                    // New document loaded!
-                                    openDoc = new OpenDocument(docId, doc.FilePath, doc);
-                                    _openDocuments.Add(openDoc);
-                                    
-                                    _activeDocument = openDoc;
-                                    _canvas.Document = doc;
+                                    // New document loaded! Add it to the active pane.
+                                    var newOpenDoc = new OpenDocument(docId, doc.FilePath, doc);
+                                    _activePane.OpenDocuments.Add(newOpenDoc);
+                                    _activePane.ActiveDocument = newOpenDoc;
+                                    _activePane.Canvas.Document = doc;
+
                                     if (_pendingNavigation.HasValue && _pendingNavigation.Value.FilePath.Equals(doc.FilePath, StringComparison.OrdinalIgnoreCase))
                                     {
-                                        _canvas.MoveCaret(_pendingNavigation.Value.Line, _pendingNavigation.Value.Character);
+                                        _activePane.Canvas.MoveCaret(_pendingNavigation.Value.Line, _pendingNavigation.Value.Character);
                                         _pendingNavigation = null;
                                     }
                                     else
                                     {
-                                        _canvas.MoveCaret(0, 0);
+                                        _activePane.Canvas.MoveCaret(0, 0);
                                     }
-                                    _canvas.ScrollX = 0;
-                                    _canvas.ScrollY = 0;
+                                    _activePane.Canvas.ScrollX = 0;
+                                    _activePane.Canvas.ScrollY = 0;
                                     
-                                    RebuildTabsUI();
-                                    UpdateScrollbars();
+                                    RebuildTabsUI(_activePane);
+                                    _activePane.UpdateScrollbars();
                                 }
                                 else
                                 {
-                                    // Incremental edit or background document update
-                                    openDoc.Document = doc;
-                                    if (_activeDocument == openDoc)
+                                    // Incremental edit or background document update in existing panes
+                                    foreach (var pane in panesWithDoc)
                                     {
-                                        _canvas.Document = doc;
-                                        _canvas.InvalidateVisual();
-                                        UpdateScrollbars();
-                                        _canvas.AdjustCaret(offset, addedLength, deletedLength);
+                                        var paneDoc = pane.OpenDocuments.First(d => d.Id == docId);
+                                        paneDoc.Document = doc;
+                                        
+                                        if (pane.ActiveDocument == paneDoc)
+                                        {
+                                            pane.Canvas.Document = doc;
+                                            pane.Canvas.InvalidateVisual();
+                                            pane.UpdateScrollbars();
+                                            
+                                            if (pane == _activePane)
+                                            {
+                                                pane.Canvas.AdjustCaret(offset, addedLength, deletedLength);
+                                            }
+                                        }
                                     }
                                 }
 
@@ -1521,62 +1393,7 @@ namespace SpanCoder.Shell
 
         private void UpdateScrollbars()
         {
-            if (_canvas.Document == null)
-            {
-                _vScroll.Maximum = 0;
-                _vScroll.ViewportSize = 0;
-                _vScroll.IsEnabled = false;
-                _hScroll.Maximum = 0;
-                _hScroll.ViewportSize = 0;
-                _hScroll.IsEnabled = false;
-                _canvas.ScrollX = 0;
-                _canvas.ScrollY = 0;
-                return;
-            }
-
-            int lineCount = _canvas.Document.GetLineCount();
-            double viewportHeight = _canvas.Bounds.Height;
-            double totalHeight = lineCount * _canvas.LineHeight;
-
-            if (totalHeight > viewportHeight)
-            {
-                _vScroll.Maximum = totalHeight - viewportHeight;
-                _vScroll.ViewportSize = viewportHeight;
-                _vScroll.IsEnabled = true;
-            }
-            else
-            {
-                _vScroll.Maximum = 0;
-                _vScroll.ViewportSize = viewportHeight;
-                _vScroll.IsEnabled = false;
-                _canvas.ScrollY = 0;
-            }
-
-            double viewportWidth = _canvas.Bounds.Width;
-            // Est. max line width: scan first 100 lines for max length or set a large max
-            int maxLineLen = 80;
-            int checkLines = Math.Min(100, lineCount);
-            for (int i = 0; i < checkLines; i++)
-            {
-                var line = _canvas.Document.GetLine(i, out _, out var rented);
-                if (line.Length > maxLineLen) maxLineLen = line.Length;
-                if (rented != null) ArrayPool<char>.Shared.Return(rented);
-            }
-
-            double maxLineWidth = _canvas.GetGutterWidth() + (maxLineLen + 10) * _canvas.CharWidth;
-            if (maxLineWidth > viewportWidth)
-            {
-                _hScroll.Maximum = maxLineWidth - viewportWidth;
-                _hScroll.ViewportSize = viewportWidth;
-                _hScroll.IsEnabled = true;
-            }
-            else
-            {
-                _hScroll.Maximum = 0;
-                _hScroll.ViewportSize = viewportWidth;
-                _hScroll.IsEnabled = false;
-                _canvas.ScrollX = 0;
-            }
+            _activePane?.UpdateScrollbars();
         }
 
         private void UpdateStatusBar()
@@ -1986,14 +1803,17 @@ namespace SpanCoder.Shell
             UpdateEditMenuState();
         }
 
-        private void RebuildTabsUI()
+        private void RebuildTabsUI(EditorPane? pane = null)
         {
-            _tabsContainer.Children.Clear();
-            foreach (var doc in _openDocuments)
+            pane ??= _activePane;
+            if (pane == null) return;
+            
+            pane.TabsContainer.Children.Clear();
+            foreach (var doc in pane.OpenDocuments)
             {
                 var tabBorder = new Border
                 {
-                    Background = doc == _activeDocument ? new SolidColorBrush(Color.Parse("#1E1E1E")) : new SolidColorBrush(Color.Parse("#2D2D2D")),
+                    Background = doc == pane.ActiveDocument ? new SolidColorBrush(Color.Parse("#1E1E1E")) : new SolidColorBrush(Color.Parse("#2D2D2D")),
                     BorderBrush = new SolidColorBrush(Color.Parse("#3D3D3D")),
                     BorderThickness = new Thickness(1, 1, 1, 0),
                     Padding = new Thickness(10, 4),
@@ -2004,7 +1824,7 @@ namespace SpanCoder.Shell
                 var nameLabel = new TextBlock
                 {
                     Text = System.IO.Path.GetFileName(doc.FilePath),
-                    Foreground = doc == _activeDocument ? Brushes.White : Brushes.Gray,
+                    Foreground = doc == pane.ActiveDocument ? Brushes.White : Brushes.Gray,
                     VerticalAlignment = VerticalAlignment.Center,
                     FontSize = 12
                 };
@@ -2025,19 +1845,29 @@ namespace SpanCoder.Shell
                 closeButton.PointerExited += (s, e) => closeButton.Foreground = Brushes.Gray;
                 
                 var localDoc = doc;
-                closeButton.Click += (s, e) => CloseDocument(localDoc);
+                closeButton.Click += (s, e) =>
+                {
+                    SetActivePane(pane);
+                    CloseDocument(localDoc);
+                };
                 tabContent.Children.Add(closeButton);
 
                 tabBorder.Child = tabContent;
                 
                 tabBorder.PointerPressed += (s, e) =>
                 {
+                    SetActivePane(pane);
                     SwitchToDocument(localDoc);
                     e.Handled = true;
                 };
 
-                _tabsContainer.Children.Add(tabBorder);
+                pane.TabsContainer.Children.Add(tabBorder);
             }
+        }
+
+        private void RebuildTabsUI()
+        {
+            RebuildTabsUI(_activePane);
         }
 
         [Command("File.OpenFolder", "Open Folder", "File", "Ctrl+Shift+O")]
@@ -2045,6 +1875,269 @@ namespace SpanCoder.Shell
         public static void OpenFolderCommand(ShellWindow window)
         {
             window.TriggerOpenFolder();
+        }
+
+        [Command("View.SplitEditorHorizontal", "Split Editor Horizontally", "View", "Ctrl+E, H")]
+        [MenuItem("View.SplitEditorHorizontal", "View/Split Editor Horizontally", 30)]
+        public static void SplitEditorHorizontalCommand(ShellWindow window)
+        {
+            window.SplitActivePane(true);
+        }
+
+        [Command("View.SplitEditorVertical", "Split Editor Vertically", "View", "Ctrl+E, V")]
+        [MenuItem("View.SplitEditorVertical", "View/Split Editor Vertically", 31)]
+        public static void SplitEditorVerticalCommand(ShellWindow window)
+        {
+            window.SplitActivePane(false);
+        }
+
+        [Command("View.UnsplitEditor", "Remove Split Editor", "View", "Ctrl+E, U")]
+        [MenuItem("View.UnsplitEditor", "View/Remove Split Editor", 32)]
+        public static void UnsplitEditorCommand(ShellWindow window)
+        {
+            window.UnsplitActivePane();
+        }
+
+        public void SetActivePane(EditorPane pane)
+        {
+            if (_activePane == pane) return;
+
+            if (_activePane != null)
+            {
+                _activePane.Border.BorderBrush = Brushes.Transparent;
+            }
+
+            // Move overlays to new active pane
+            if (_autocompleteBorder.Parent is Grid oldAutoGrid) oldAutoGrid.Children.Remove(_autocompleteBorder);
+            if (_hoverBorder.Parent is Grid oldHoverGrid) oldHoverGrid.Children.Remove(_hoverBorder);
+            if (_debugToolbar.Parent is Grid oldDebugGrid) oldDebugGrid.Children.Remove(_debugToolbar);
+
+            _activePane = pane;
+            _activePane.Border.BorderBrush = new SolidColorBrush(Color.Parse("#007ACC"));
+
+            pane.EditorGrid.Children.Add(_autocompleteBorder);
+            pane.EditorGrid.Children.Add(_hoverBorder);
+            pane.EditorGrid.Children.Add(_debugToolbar);
+
+            RebuildTabsUI(pane);
+            pane.UpdateScrollbars();
+            UpdateStatusBar();
+            UpdateEditMenuState();
+            UpdateInlayHintsAndCodeLens();
+        }
+
+        public void SplitActivePane(bool horizontal)
+        {
+            if (_editorPanes.Count >= 2)
+            {
+                _statusBar.Text = "Maximum 2 editor panes supported.";
+                return;
+            }
+
+            var newPane = new EditorPane(this);
+            WireCanvasEvents(newPane);
+
+            if (_activePane.ActiveDocument != null)
+            {
+                var originalDoc = _activePane.ActiveDocument;
+                var copiedDoc = new OpenDocument(originalDoc.Id, originalDoc.FilePath, originalDoc.Document)
+                {
+                    CaretLine = originalDoc.CaretLine,
+                    CaretCol = originalDoc.CaretCol,
+                    ScrollX = originalDoc.ScrollX,
+                    ScrollY = originalDoc.ScrollY
+                };
+                newPane.OpenDocuments.Add(copiedDoc);
+                newPane.ActiveDocument = copiedDoc;
+                newPane.Canvas.Document = copiedDoc.Document;
+                newPane.Canvas.MoveCaret(copiedDoc.CaretLine, copiedDoc.CaretCol);
+                newPane.Canvas.ScrollX = copiedDoc.ScrollX;
+                newPane.Canvas.ScrollY = copiedDoc.ScrollY;
+            }
+
+            _editorPanes.Add(newPane);
+            RebuildSplitLayout(horizontal);
+            SetActivePane(newPane);
+        }
+
+        public void UnsplitPane(EditorPane paneToRemove)
+        {
+            if (_editorPanes.Count < 2) return;
+
+            var remainingPane = _editorPanes.First(p => p != paneToRemove);
+
+            _editorPanes.Remove(paneToRemove);
+
+            // Remove overlays
+            if (_autocompleteBorder.Parent is Grid autoGrid) autoGrid.Children.Remove(_autocompleteBorder);
+            if (_hoverBorder.Parent is Grid hoverGrid) hoverGrid.Children.Remove(_hoverBorder);
+            if (_debugToolbar.Parent is Grid debugGrid) debugGrid.Children.Remove(_debugToolbar);
+
+            _editorSplitContainer.Children.Clear();
+            _editorSplitContainer.RowDefinitions.Clear();
+            _editorSplitContainer.ColumnDefinitions.Clear();
+
+            _editorSplitContainer.Children.Add(remainingPane);
+            Grid.SetRow(remainingPane, 0);
+            Grid.SetColumn(remainingPane, 0);
+
+            SetActivePane(remainingPane);
+        }
+
+        public void UnsplitActivePane()
+        {
+            UnsplitPane(_activePane);
+        }
+
+        private void RebuildSplitLayout(bool horizontal)
+        {
+            _editorSplitContainer.Children.Clear();
+            _editorSplitContainer.RowDefinitions.Clear();
+            _editorSplitContainer.ColumnDefinitions.Clear();
+
+            if (_editorPanes.Count == 1)
+            {
+                _editorSplitContainer.Children.Add(_editorPanes[0]);
+                Grid.SetRow(_editorPanes[0], 0);
+                Grid.SetColumn(_editorPanes[0], 0);
+            }
+            else if (_editorPanes.Count == 2)
+            {
+                var pane1 = _editorPanes[0];
+                var pane2 = _editorPanes[1];
+
+                var splitter = new GridSplitter
+                {
+                    Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
+                };
+
+                if (horizontal)
+                {
+                    _editorSplitContainer.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+                    _editorSplitContainer.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+                    _editorSplitContainer.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+
+                    splitter.Height = 4;
+                    splitter.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    splitter.ResizeDirection = GridResizeDirection.Rows;
+
+                    _editorSplitContainer.Children.Add(pane1);
+                    Grid.SetRow(pane1, 0);
+
+                    _editorSplitContainer.Children.Add(splitter);
+                    Grid.SetRow(splitter, 1);
+
+                    _editorSplitContainer.Children.Add(pane2);
+                    Grid.SetRow(pane2, 2);
+                }
+                else
+                {
+                    _editorSplitContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+                    _editorSplitContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+                    _editorSplitContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+
+                    splitter.Width = 4;
+                    splitter.VerticalAlignment = VerticalAlignment.Stretch;
+                    splitter.ResizeDirection = GridResizeDirection.Columns;
+
+                    _editorSplitContainer.Children.Add(pane1);
+                    Grid.SetColumn(pane1, 0);
+
+                    _editorSplitContainer.Children.Add(splitter);
+                    Grid.SetColumn(splitter, 1);
+
+                    _editorSplitContainer.Children.Add(pane2);
+                    Grid.SetColumn(pane2, 2);
+                }
+            }
+        }
+
+        private void WireCanvasEvents(EditorPane pane)
+        {
+            var canvas = pane.Canvas;
+            canvas.TextInputReceived += (offset, text) =>
+            {
+                if (canvas.Document == null || _engine == null) return;
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + text.Length * 2];
+                BinaryMessageSerializer.WriteInsertText(buffer, canvas.Document.Id, offset, text);
+                _engine.Send(buffer);
+            };
+
+            canvas.TextDeleteReceived += (offset, len) =>
+            {
+                if (canvas.Document == null || _engine == null) return;
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4];
+                BinaryMessageSerializer.WriteDeleteText(buffer, canvas.Document.Id, offset, len);
+                _engine.Send(buffer);
+            };
+
+            canvas.CaretMoved += UpdateStatusBar;
+
+            canvas.AutocompleteRequested += (offset) =>
+            {
+                if (canvas.Document == null || _engine == null) return;
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
+                BinaryMessageSerializer.WriteAutocompleteRequest(buffer, canvas.Document.Id, offset);
+                _engine.Send(buffer);
+            };
+
+            canvas.HoverRequested += (offset, x, y) =>
+            {
+                if (canvas.Document == null || _engine == null) return;
+                _lastHoverMouseX = x;
+                _lastHoverMouseY = y;
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
+                BinaryMessageSerializer.WriteHoverRequest(buffer, canvas.Document.Id, offset);
+                _engine.Send(buffer);
+            };
+
+            canvas.GotoDefinitionRequested += (offset) =>
+            {
+                if (canvas.Document == null || _engine == null) return;
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
+                BinaryMessageSerializer.WriteGotoDefinitionRequest(buffer, canvas.Document.Id, offset);
+                _engine.Send(buffer);
+            };
+
+            canvas.FindReferencesRequested += (offset) =>
+            {
+                if (canvas.Document == null || _engine == null) return;
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize];
+                BinaryMessageSerializer.WriteFindReferencesRequest(buffer, canvas.Document.Id, offset);
+                _engine.Send(buffer);
+            };
+
+            canvas.RenameRequested += async (offset) =>
+            {
+                if (canvas.Document == null || _engine == null) return;
+                string word = GetWordAtCaret();
+                if (string.IsNullOrEmpty(word)) return;
+
+                var dialog = new RenameDialog(word);
+                await dialog.ShowDialog(this);
+                if (!string.IsNullOrEmpty(dialog.Result) && dialog.Result != word)
+                {
+                    byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4 + dialog.Result.Length * 2];
+                    BinaryMessageSerializer.WriteRenameRequest(buffer, canvas.Document.Id, offset, dialog.Result);
+                    _engine.Send(buffer);
+                }
+            };
+
+            canvas.MouseMovedOrLeft += HideHover;
+
+            canvas.BreakpointsChanged += (bps) =>
+            {
+                _debugBreakpointsList.ItemsSource = bps.Select(bp => $"Line {bp}").ToList();
+                if (_isDebugging)
+                {
+                    SendBreakpointsToEngine();
+                }
+            };
+
+            canvas.AutocompleteUpRequested += OnAutocompleteUp;
+            canvas.AutocompleteDownRequested += OnAutocompleteDown;
+            canvas.AutocompleteCommitRequested += OnAutocompleteCommit;
+            canvas.AutocompleteCancelRequested += HideAutocomplete;
         }
 
         [Command("File.OpenSolution", "Open Solution", "File", "Ctrl+Shift+L")]
@@ -2336,10 +2429,13 @@ namespace SpanCoder.Shell
                     }
                     else
                     {
-                        int absOffset = _canvas.GetCaretAbsoluteOffset();
-                        byte[] insBuf = new byte[BinaryMessageSerializer.HeaderSize + 4 + text.Length * 2];
-                        BinaryMessageSerializer.WriteInsertText(insBuf, _canvas.Document.Id, absOffset, text);
-                        _engine.Send(insBuf);
+                        var offsets = _canvas.GetCaretOffsetsDescending();
+                        foreach (var offset in offsets)
+                        {
+                            byte[] insBuf = new byte[BinaryMessageSerializer.HeaderSize + 4 + text.Length * 2];
+                            BinaryMessageSerializer.WriteInsertText(insBuf, _canvas.Document.Id, offset, text);
+                            _engine.Send(insBuf);
+                        }
                     }
                 }
             }
@@ -2583,7 +2679,7 @@ namespace SpanCoder.Shell
             }
         }
 
-        private class OpenDocument
+        public class OpenDocument
         {
             public int Id { get; }
             public string FilePath { get; set; }

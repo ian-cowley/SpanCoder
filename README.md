@@ -120,6 +120,13 @@ graph TD
 * **Native Markdown Rendering**: Upgrades plain text output with dynamic block and inline runs, styling headers, horizontal rules, lists, bold/italics, and custom Consolas block code scrollable boxes.
 * **Binary File Safety Guards**: Auto-detects null bytes in files to block the AI agent from accidentally reading or modifying binary DLLs, EXEs, or images.
 
+### 17. Multi-Pane Split Editor
+* **Dynamic Split Layouts**: Split the editor horizontally or vertically to view and edit multiple files concurrently, or multiple views of the same file at different scroll/caret positions.
+* **Real-Time Synchronization**: Edits to a shared document inside one pane reflect instantly in all other visible panes displaying that document.
+* **Active Pane Visual Highlight**: Active focused editor is visually distinguished with a blue border highlight (`#007ACC`).
+* **Focus Overlay Migration**: Automatically shifts overlays (such as autocompletions, code hovers, and debugging controls) to the active editor pane's visual tree.
+* **Compile-Time Command Routing**: Configured with compile-time source-generated shortcut keys (`Ctrl+E, H` to split horizontally, `Ctrl+E, V` to split vertically, and `Ctrl+E, U` to unsplit).
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions
@@ -346,7 +353,8 @@ Interactive debugging features are integrated into the main shell via several de
 * [x] **AI Chat & Command Palette Actions**: Build a floating sidebar chat window and command palette shortcodes (e.g., `/explain`, `/refactor`, `/fix`) to interact directly with code snippets.
 
 ### Phase 2: Advanced Editing Features & Multi-Caret Support
-* [ ] **Simultaneous Multi-Cursors**: Enable multi-caret inputs and selections with parallel state updates in the Piece Table.
+* [x] **Split Editor Layouts**: Support vertical and horizontal workspace splitting to edit multiple files or different views of the same file concurrently.
+* [x] **Simultaneous Multi-Cursors**: Enable multi-caret inputs and selections with parallel state updates in the Piece Table.
 * [ ] **Vim Emulation Mode**: Implement a zero-dependency, out-of-process modal keyboard layout adapter.
 * [ ] **Structural Code Folding**: Add folding support for classes, methods, and blocks, using background AST parsers.
 

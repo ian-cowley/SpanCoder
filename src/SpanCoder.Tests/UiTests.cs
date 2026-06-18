@@ -21,13 +21,7 @@ namespace SpanCoder.Tests
             window.InitializeLayout();
 
             // Locate editor canvas
-            var mainGrid = window.Content as Grid;
-            Assert.NotNull(mainGrid);
-
-            var workspaceGrid = mainGrid.Children.OfType<Grid>().First(g => Grid.GetRow(g) == 2);
-            var editorPane = workspaceGrid.Children.OfType<Grid>().First(g => Grid.GetColumn(g) == 2);
-            var editorGrid = editorPane.Children.OfType<Grid>().First(g => Grid.GetRow(g) == 1);
-            var canvas = editorGrid.Children.OfType<TextEditorCanvas>().First();
+            var canvas = window.ActiveCanvas;
 
             Assert.NotNull(canvas);
 

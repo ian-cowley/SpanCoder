@@ -213,19 +213,15 @@ namespace SpanCoder.Engine
             string[] lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
             bool first = true;
 
+            bool inBlockComment = false;
+            bool inVerbatimString = false;
+
             for (int i = 0; i < lines.Length; i++)
             {
                 string line = lines[i];
+                string trimmed = line.Trim();
 
-                int todoIdx = line.IndexOf("todo", StringComparison.OrdinalIgnoreCase);
-                if (todoIdx >= 0)
-                {
-                    if (!first) diagnosticsList.Append(",");
-                    first = false;
-                    diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{todoIdx}}},\"end\":{{\"line\":{i},\"character\":{todoIdx + 4}}}}},\"severity\":2,\"message\":\"TODO comment found\"}}");
-                }
-
-                if (line.Trim().StartsWith("var ", StringComparison.Ordinal) && IsVarMissingSemicolon(lines, i))
+                if (trimmed.StartsWith("var ", StringComparison.Ordinal) && IsVarMissingSemicolon(lines, i))
                 {
                     if (!first) diagnosticsList.Append(",");
                     first = false;
@@ -233,12 +229,134 @@ namespace SpanCoder.Engine
                     diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":0}},\"end\":{{\"line\":{i},\"character\":{lineLen}}}}},\"severity\":1,\"message\":\"; expected\"}}");
                 }
 
-                int errIdx = line.IndexOf("error", StringComparison.OrdinalIgnoreCase);
-                if (errIdx >= 0 && !line.Contains("errorDescription", StringComparison.OrdinalIgnoreCase) && !line.Contains("ErrorMock", StringComparison.OrdinalIgnoreCase))
+                bool inLineComment = false;
+                bool inString = false;
+                bool inChar = false;
+
+                for (int c = 0; c < line.Length; c++)
                 {
-                    if (!first) diagnosticsList.Append(",");
-                    first = false;
-                    diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{errIdx}}},\"end\":{{\"line\":{i},\"character\":{errIdx + 5}}}}},\"severity\":1,\"message\":\"Mock error description\"}}");
+                    char ch = line[c];
+
+                    if (!inString && !inChar && !inVerbatimString)
+                    {
+                        if (!inBlockComment && ch == '/' && c + 1 < line.Length && line[c + 1] == '/')
+                        {
+                            inLineComment = true;
+                            c++;
+                            continue;
+                        }
+                        if (!inLineComment && ch == '/' && c + 1 < line.Length && line[c + 1] == '*')
+                        {
+                            inBlockComment = true;
+                            c++;
+                            continue;
+                        }
+                    }
+
+                    if (inBlockComment)
+                    {
+                        if (ch == '*' && c + 1 < line.Length && line[c + 1] == '/')
+                        {
+                            inBlockComment = false;
+                            c++;
+                        }
+                        else
+                        {
+                            if (c + 4 <= line.Length && string.Equals(line.Substring(c, 4), "todo", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (!first) diagnosticsList.Append(",");
+                                first = false;
+                                diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{c}}},\"end\":{{\"line\":{i},\"character\":{c + 4}}}}},\"severity\":2,\"message\":\"TODO comment found\"}}");
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (inLineComment)
+                    {
+                        if (c + 4 <= line.Length && string.Equals(line.Substring(c, 4), "todo", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!first) diagnosticsList.Append(",");
+                            first = false;
+                            diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{c}}},\"end\":{{\"line\":{i},\"character\":{c + 4}}}}},\"severity\":2,\"message\":\"TODO comment found\"}}");
+                        }
+                        continue;
+                    }
+
+                    if (inVerbatimString)
+                    {
+                        if (ch == '"')
+                        {
+                            if (c + 1 < line.Length && line[c + 1] == '"')
+                            {
+                                c++;
+                            }
+                            else
+                            {
+                                inVerbatimString = false;
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (inString)
+                    {
+                        if (ch == '\\' && c + 1 < line.Length)
+                        {
+                            c++;
+                        }
+                        else if (ch == '"')
+                        {
+                            inString = false;
+                        }
+                        continue;
+                    }
+
+                    if (inChar)
+                    {
+                        if (ch == '\\' && c + 1 < line.Length)
+                        {
+                            c++;
+                        }
+                        else if (ch == '\'')
+                        {
+                            inChar = false;
+                        }
+                        continue;
+                    }
+
+                    if (ch == '@' && c + 1 < line.Length && line[c + 1] == '"')
+                    {
+                        inVerbatimString = true;
+                        c++;
+                        continue;
+                    }
+                    if (ch == '"')
+                    {
+                        inString = true;
+                        continue;
+                    }
+                    if (ch == '\'')
+                    {
+                        inChar = true;
+                        continue;
+                    }
+
+                    if (c + 5 <= line.Length && string.Equals(line.Substring(c, 5), "error", StringComparison.OrdinalIgnoreCase))
+                    {
+                        bool isPrevWordChar = c > 0 && (char.IsLetterOrDigit(line[c - 1]) || line[c - 1] == '_');
+                        bool isNextWordChar = c + 5 < line.Length && (char.IsLetterOrDigit(line[c + 5]) || line[c + 5] == '_');
+
+                        if (!isPrevWordChar && !isNextWordChar)
+                        {
+                            if (!line.Contains("errorDescription", StringComparison.OrdinalIgnoreCase) && !line.Contains("ErrorMock", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (!first) diagnosticsList.Append(",");
+                                first = false;
+                                diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{c}}},\"end\":{{\"line\":{i},\"character\":{c + 5}}}}},\"severity\":1,\"message\":\"Mock error description\"}}");
+                            }
+                        }
+                    }
                 }
             }
 

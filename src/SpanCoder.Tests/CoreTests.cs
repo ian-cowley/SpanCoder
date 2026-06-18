@@ -514,6 +514,9 @@ namespace SpanCoder.Tests
                 "}\n" +
                 "\";\n" +
                 "\n" +
+                "// Log some error here\n" +
+                "Console.WriteLine(\"Accept error: message\");\n" +
+                "error\n" +
                 "var invalidVar = 456\n";
 
             File.WriteAllText(tempFile, fileContent);
@@ -535,6 +538,9 @@ namespace SpanCoder.Tests
 
                 var semicolonDiags = System.Linq.Enumerable.ToList(System.Linq.Enumerable.Where(reportedDiags, d => d.Message.Contains("; expected")));
                 Assert.Single(semicolonDiags);
+
+                var mockErrorDiags = System.Linq.Enumerable.ToList(System.Linq.Enumerable.Where(reportedDiags, d => d.Message.Contains("Mock error description")));
+                Assert.Single(mockErrorDiags);
             }
             finally
             {

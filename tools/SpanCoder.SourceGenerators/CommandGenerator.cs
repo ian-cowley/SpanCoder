@@ -15,13 +15,13 @@ namespace SpanCoder.SourceGenerators
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
             var methodProvider = context.SyntaxProvider.CreateSyntaxProvider(
-                predicate: (node, _) => node is MethodDeclarationSyntax m && m.AttributeLists.Count > 0,
-                transform: (ctx, _) => GetCommandMethodInfo(ctx)
+                (node, _) => node is MethodDeclarationSyntax && ((MethodDeclarationSyntax)node).AttributeLists.Count > 0,
+                (ctx, _) => GetCommandMethodInfo(ctx)
             ).Where(m => m != null).Select((m, _) => m!);
 
             var classProvider = context.SyntaxProvider.CreateSyntaxProvider(
-                predicate: (node, _) => node is ClassDeclarationSyntax c && c.AttributeLists.Count > 0,
-                transform: (ctx, _) => GetPluginClassInfo(ctx)
+                (node, _) => node is ClassDeclarationSyntax && ((ClassDeclarationSyntax)node).AttributeLists.Count > 0,
+                (ctx, _) => GetPluginClassInfo(ctx)
             ).Where(c => c != null).Select((c, _) => c!);
 
             var combined = methodProvider.Collect().Combine(classProvider.Collect());

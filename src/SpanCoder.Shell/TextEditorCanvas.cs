@@ -243,6 +243,20 @@ namespace SpanCoder.Shell
             }
         }
 
+        private string? _activeLineGitBlame;
+        public string? ActiveLineGitBlame
+        {
+            get => _activeLineGitBlame;
+            set
+            {
+                if (_activeLineGitBlame != value)
+                {
+                    _activeLineGitBlame = value;
+                    Dispatcher.UIThread.Post(InvalidateVisual, DispatcherPriority.Render);
+                }
+            }
+        }
+
         public event Action<System.Collections.Generic.List<int>>? BreakpointsChanged;
 
         public System.Collections.Generic.List<int> GetBreakpoints() => new System.Collections.Generic.List<int>(_breakpoints);
@@ -1743,6 +1757,7 @@ namespace SpanCoder.Shell
                 }
 
                 bool hasGhost = i == CaretLine && !string.IsNullOrEmpty(GhostText) && CaretAbsoluteOffset == GhostTextOffset;
+                double textWidth = 0;
                 if (renderLen > 0 || hasGhost)
                 {
                     string textStr = renderLen > 0 ? lineSpan.Slice(0, renderLen).ToString() : "";
@@ -1791,30 +1806,124 @@ namespace SpanCoder.Shell
                         formatted.SetForegroundBrush(new SolidColorBrush(Color.Parse("#707070")), ghostIndex, GhostText!.Length);
                     }
 
+                    textWidth = formatted.Width;
+
                     // Offset text by gutter width
                     context.DrawText(formatted, new Point(gutterWidth + 10 - ScrollX, yOffset));
                 }
 
-                // Draw squiggles for this line
-                if (doc != null)
+                long lineStart = doc!.GetLineStart(i);
+                long lineEnd = (i + 1 < lineCount) ? doc!.GetLineStart(i + 1) : doc!.Length;
+
+                // 1. ErrorLens Inline Diagnostics
+                var lineDiags = new System.Collections.Generic.List<DiagnosticItem>();
+                foreach (var diag in _diagnostics)
                 {
-                    long lineStart = doc!.GetLineStart(i);
-                    long lineEnd = (i + 1 < lineCount) ? doc!.GetLineStart(i + 1) : doc!.Length;
-                    foreach (var diag in _diagnostics)
+                    if (diag.StartOffset < lineEnd && diag.EndOffset >= lineStart)
                     {
-                        if (diag.StartOffset < lineEnd && diag.EndOffset >= lineStart)
+                        lineDiags.Add(diag);
+                    }
+                }
+
+                double diagWidth = 0;
+                bool hasDiagnostics = lineDiags.Count > 0;
+                if (hasDiagnostics)
+                {
+                    byte highestSeverity = 4;
+                    var messages = new System.Collections.Generic.List<string>();
+                    foreach (var diag in lineDiags)
+                    {
+                        byte sev = diag.Severity == 0 ? (byte)4 : diag.Severity;
+                        if (sev < highestSeverity)
                         {
-                            int startCol = Math.Max(0, diag.StartOffset - (int)lineStart);
-                            int endCol = Math.Min(renderLen, diag.EndOffset - (int)lineStart);
-                            if (startCol < endCol)
-                            {
-                                double startX = gutterWidth + 10 + startCol * CharWidth - ScrollX;
-                                double endX = gutterWidth + 10 + endCol * CharWidth - ScrollX;
-                                double y = (v * LineHeight) - ScrollY + LineHeight - 2;
-                                IBrush brush = diag.Severity == 1 ? Brushes.Red : new SolidColorBrush(Color.Parse("#FFC800"));
-                                DrawSquiggle(context, startX, endX, y, brush);
-                            }
+                            highestSeverity = sev;
                         }
+                        if (!string.IsNullOrEmpty(diag.Message))
+                        {
+                            messages.Add(diag.Message);
+                        }
+                    }
+
+                    string joinedMessage = string.Join(" • ", messages);
+                    if (joinedMessage.Length > 150)
+                    {
+                        joinedMessage = joinedMessage.Substring(0, 147) + "...";
+                    }
+
+                    IBrush diagTextBrush = Brushes.Gray;
+                    IBrush diagBgBrush = new SolidColorBrush(Color.FromArgb(15, 133, 133, 133));
+                    if (highestSeverity == 1) // Error
+                    {
+                        diagTextBrush = new SolidColorBrush(Color.Parse("#FF5C5C"));
+                        diagBgBrush = new SolidColorBrush(Color.FromArgb(20, 244, 71, 71));
+                    }
+                    else if (highestSeverity == 2) // Warning
+                    {
+                        diagTextBrush = new SolidColorBrush(Color.Parse("#FFC800"));
+                        diagBgBrush = new SolidColorBrush(Color.FromArgb(20, 255, 200, 0));
+                    }
+                    else if (highestSeverity == 3) // Info
+                    {
+                        diagTextBrush = new SolidColorBrush(Color.Parse("#519ABA"));
+                        diagBgBrush = new SolidColorBrush(Color.FromArgb(15, 81, 154, 186));
+                    }
+                    else
+                    {
+                        diagTextBrush = new SolidColorBrush(Color.Parse("#858585"));
+                        diagBgBrush = new SolidColorBrush(Color.FromArgb(15, 133, 133, 133));
+                    }
+
+                    var diagFormatted = new FormattedText(
+                        joinedMessage,
+                        CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight,
+                        _typeface,
+                        _fontSize - 2.0,
+                        diagTextBrush
+                    );
+
+                    double diagX = gutterWidth + 10 + textWidth - ScrollX + 20;
+                    diagWidth = diagFormatted.Width;
+
+                    context.FillRectangle(
+                        diagBgBrush,
+                        new Rect(diagX, yOffset + 2, diagWidth + 8, LineHeight - 4),
+                        2.0f
+                    );
+                    context.DrawText(diagFormatted, new Point(diagX + 4, yOffset + 1.0));
+                }
+
+                // 2. Inline Git Blame
+                if (i == CaretLine && !string.IsNullOrEmpty(ActiveLineGitBlame))
+                {
+                    var blameFormatted = new FormattedText(
+                        ActiveLineGitBlame,
+                        CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight,
+                        new Typeface(_typeface.FontFamily, FontStyle.Italic, FontWeight.Normal),
+                        _fontSize - 2.0,
+                        new SolidColorBrush(Color.Parse("#707070"))
+                    );
+                    double blameX = gutterWidth + 10 + textWidth - ScrollX + 20;
+                    if (hasDiagnostics)
+                    {
+                        blameX += diagWidth + 15;
+                    }
+                    context.DrawText(blameFormatted, new Point(blameX, yOffset + 1.0));
+                }
+
+                // 3. Draw squiggles for this line
+                foreach (var diag in lineDiags)
+                {
+                    int startCol = Math.Max(0, diag.StartOffset - (int)lineStart);
+                    int endCol = Math.Min(renderLen, diag.EndOffset - (int)lineStart);
+                    if (startCol < endCol)
+                    {
+                        double startX = gutterWidth + 10 + startCol * CharWidth - ScrollX;
+                        double endX = gutterWidth + 10 + endCol * CharWidth - ScrollX;
+                        double y = (v * LineHeight) - ScrollY + LineHeight - 2;
+                        IBrush brush = diag.Severity == 1 ? Brushes.Red : new SolidColorBrush(Color.Parse("#FFC800"));
+                        DrawSquiggle(context, startX, endX, y, brush);
                     }
                 }
 

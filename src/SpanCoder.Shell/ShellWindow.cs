@@ -2403,6 +2403,9 @@ namespace SpanCoder.Shell
         private void WireCanvasEvents(EditorPane pane)
         {
             var canvas = pane.Canvas;
+            int lastBlameLine = -1;
+            IDocumentView? lastBlameDoc = null;
+
             canvas.TextInputReceived += (offset, text) =>
             {
                 if (canvas.Document == null || _engine == null) return;
@@ -2456,14 +2459,49 @@ namespace SpanCoder.Shell
                 _engine.Send(finalBuffer);
             };
 
-            canvas.CaretMoved += () =>
+            canvas.CaretMoved += async () =>
             {
                 UpdateStatusBar();
                 if (_collabClient != null && _collabClient.IsConnected && canvas.Document != null)
                 {
                     _ = _collabClient.SendCursorAsync(canvas.CaretLine, canvas.CaretCol, canvas.SelectionStartOffset, canvas.SelectionEndOffset);
                 }
+
+                // Inline Git Blame
+                if (_gitProvider == null) return;
+
+                if (canvas.Document == null || string.IsNullOrEmpty(canvas.Document.FilePath))
+                {
+                    canvas.ActiveLineGitBlame = null;
+                    lastBlameDoc = null;
+                    return;
+                }
+
+                int currentLine = canvas.CaretLine;
+                var currentDoc = canvas.Document;
+                if (currentLine == lastBlameLine && currentDoc == lastBlameDoc) return;
+                lastBlameLine = currentLine;
+                lastBlameDoc = currentDoc;
+
+                canvas.ActiveLineGitBlame = null;
+
+                try
+                {
+                    string? blameText = await _gitProvider.GetLineBlameAsync(canvas.Document.FilePath, currentLine + 1);
+                    if (canvas.CaretLine == currentLine && canvas.Document == currentDoc)
+                    {
+                        canvas.ActiveLineGitBlame = blameText;
+                    }
+                }
+                catch
+                {
+                    if (canvas.CaretLine == currentLine && canvas.Document == currentDoc)
+                    {
+                        canvas.ActiveLineGitBlame = null;
+                    }
+                }
             };
+
             canvas.VimModeChanged += UpdateStatusBar;
 
             canvas.AutocompleteRequested += (offset) =>

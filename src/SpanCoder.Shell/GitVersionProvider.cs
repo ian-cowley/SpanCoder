@@ -286,5 +286,105 @@ namespace SpanCoder.Shell
                 return "";
             }
         }
+
+        public async Task<string?> GetLineBlameAsync(string filePath, int line)
+        {
+            if (string.IsNullOrEmpty(_workingDirectory)) return null;
+
+            string relativePath = filePath;
+            if (File.Exists(filePath))
+            {
+                try
+                {
+                    relativePath = Path.GetRelativePath(_workingDirectory, filePath).Replace("\\", "/");
+                }
+                catch
+                {
+                    relativePath = filePath;
+                }
+            }
+
+            string output = await RunGitCommandAsync($"blame -L {line},{line} --porcelain -- \"{relativePath}\"");
+            if (string.IsNullOrEmpty(output)) return null;
+
+            string author = "Unknown";
+            string summary = "";
+            long authorTime = 0;
+            string shaAbbrev = "";
+
+            using var reader = new StringReader(output);
+            string? firstLine = await reader.ReadLineAsync();
+            if (firstLine != null && firstLine.Length >= 8)
+            {
+                shaAbbrev = firstLine.Substring(0, 8);
+                if (shaAbbrev.StartsWith("00000000"))
+                {
+                    return "You • Uncommitted changes";
+                }
+            }
+
+            string? blameLine;
+            while ((blameLine = await reader.ReadLineAsync()) != null)
+            {
+                if (blameLine.StartsWith("author "))
+                {
+                    author = blameLine.Substring(7).Trim();
+                }
+                else if (blameLine.StartsWith("author-time "))
+                {
+                    long.TryParse(blameLine.Substring(12).Trim(), out authorTime);
+                }
+                else if (blameLine.StartsWith("summary "))
+                {
+                    summary = blameLine.Substring(8).Trim();
+                }
+            }
+
+            if (string.IsNullOrEmpty(shaAbbrev)) return null;
+
+            string timeStr = authorTime > 0 ? GetRelativeTime(authorTime) : "";
+            string timeAndAuthor = string.IsNullOrEmpty(timeStr) ? author : $"{author}, {timeStr}";
+            
+            return $"{shaAbbrev} ({timeAndAuthor}) • {summary}";
+        }
+
+        private string GetRelativeTime(long epochSeconds)
+        {
+            try
+            {
+                var time = DateTimeOffset.FromUnixTimeSeconds(epochSeconds).LocalDateTime;
+                var span = DateTime.Now - time;
+                if (span.TotalDays > 365)
+                {
+                    int years = (int)(span.TotalDays / 365);
+                    return $"{years} year{(years > 1 ? "s" : "")} ago";
+                }
+                if (span.TotalDays > 30)
+                {
+                    int months = (int)(span.TotalDays / 30);
+                    return $"{months} month{(months > 1 ? "s" : "")} ago";
+                }
+                if (span.TotalDays >= 1)
+                {
+                    int days = (int)span.TotalDays;
+                    return $"{days} day{(days > 1 ? "s" : "")} ago";
+                }
+                if (span.TotalHours >= 1)
+                {
+                    int hours = (int)span.TotalHours;
+                    return $"{hours} hour{(hours > 1 ? "s" : "")} ago";
+                }
+                if (span.TotalMinutes >= 1)
+                {
+                    int minutes = (int)span.TotalMinutes;
+                    return $"{minutes} minute{(minutes > 1 ? "s" : "")} ago";
+                }
+                return "just now";
+            }
+            catch
+            {
+                return "";
+            }
+        }
     }
 }

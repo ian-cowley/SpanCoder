@@ -94,6 +94,24 @@ graph TD
 * **Resilient Extensibility** (`SpanCoder.Extensions.Languages`): Contributes rich language metadata (keywords, syntax coloring, line and block comment structures) and custom commands out-of-process.
 * **Dynamic Sidebar Toolbar Contribution**: Seamlessly registers and mounts buttons onto the Shell UI's workspace toolbar, communicating exclusively via structured JSON-RPC packets over low-latency socket buffers.
 
+### 11. Extensible Options & Settings Framework
+* **Theme & Custom Settings** (`SettingsWindow.cs`, `SettingsManager.cs`): Modal options dialog (`Ctrl+,` or `Tools -> Options`) permitting changes to theme, typography, line height, and editor behavior.
+* **Extension Configuration Registration**: Extensions dynamically register custom configuration schemas via JSON manifests, allowing developers to configure third-party plugins in a unified interface. Settings persist locally in `%APPDATA%/SpanCoder/settings.json`.
+
+### 12. Real-Time Resource Diagnostics Graphs
+* **Rolling Performance Profiler** (`PerformanceGraphsControl.cs`): Renders dynamic CPU utilization (%) and Working Set RAM consumption (MB) line charts using custom Skia brushes with beautiful neon gradients.
+* **Bottom Panel Integration**: Integrates a dedicated "Performance" diagnostic tab right next to the embedded Terminal pane.
+
+### 13. Headless UI Scenario Testing Suite
+* **Simulated User Interactions** (`UiTests.cs`): Uses `Avalonia.Headless.XUnit` to bootstrap the editor shell in a headless environment, asserting viewport coordinates, command palette inputs, settings applications, and tree navigation rendering.
+* **State Cleanliness**: Prevents cross-test state leakages via dynamic unregistration and cleanups of extension descriptors.
+
+### 14. Cross-Platform Embedded PTY Terminal
+* **PTY Terminal Emulator** (`TerminalControl.cs`, `PtyHost.cs`): Provides a built-in terminal control in `SpanCoder.Shell` handling standard pseudo-terminal (PTY) streams (ConPTY on Windows, `/dev/ptmx` on Unix), rendering native shells inside the IDE with zero input lag.
+
+### 15. Git Version Control & Gutter Indicators
+* **Gutter Markers & Staging**: Background Git worker queries status, displaying color-coded line modifications (added, modified, deleted) directly inside the canvas gutter. Includes a sidebar panel for staging files, writing commit messages, and managing branches.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions
@@ -314,33 +332,19 @@ Interactive debugging features are integrated into the main shell via several de
 
 ## Phased Improvement Roadmap
 
-### Phase 1: Core Performance and Polish (Focus: WOW UX & Layouts)
-* [x] **Stationary Line Numbers Gutter**: Renders a stationary sidebar gutter that prevents text scrolling under the gutter area.
-* [x] **Caret Auto-Scroll Viewport**: Forces viewport scrolling when navigating via keyboard so the caret remains visible.
-* [x] **Premium Command Palette Overlay**: Creates a centered, blurred dropdown supporting workspace file matching and command dispatch.
-* [x] **Built-in Language Highlighters**: Implemented Native AOT-friendly, zero-allocation core syntax highlighting for JSON, HTML, JavaScript, CSS, and Markdown.
+### Phase 1: AI Copilot & Code Generation Integration (Upcoming)
+* [ ] **Out-of-Process LLM Connector**: Background agent host service to interface with local or cloud-based LLMs without blocking the primary editing loop.
+* [ ] **Inline Ghost Text**: Support inline ghost-text code completions using zero-allocation overlay renderings.
+* [ ] **AI Chat & Command Palette Actions**: Build a floating sidebar chat window and command palette shortcodes (e.g., `/explain`, `/refactor`, `/fix`) to interact directly with code snippets.
 
-### Phase 2: Production-grade LSP client & Grep Workspace Search
-* [x] **Stdio Executable Integrations**: Upgrade the `LspClient` to dynamically spawn real command-line LSPs (like `csharp-ls` or `pyright`) based on file extensions.
-* [x] **Comprehensive Semantic Routing**: Route "Goto Definition" (F12) [x], "Find References" (Shift+F12) [x], "Rename" (F2) [x], and "Document Symbols" [x] from the LSP process down to the UI.
-* [x] **Grep Workspace Integration**: Reference the sibling **[Glacier.Grep](../Glacier.Grep)** engine in `SpanCoder.Engine` to execute regex searches across all workspace documents in sub-milliseconds, bypassing UI thread overhead.
+### Phase 2: Advanced Editing Features & Multi-Caret Support
+* [ ] **Simultaneous Multi-Cursors**: Enable multi-caret inputs and selections with parallel state updates in the Piece Table.
+* [ ] **Vim Emulation Mode**: Implement a zero-dependency, out-of-process modal keyboard layout adapter.
+* [ ] **Structural Code Folding**: Add folding support for classes, methods, and blocks, using background AST parsers.
 
-### Phase 3: Interactive Debugging (DAP Integration)
-* [x] **DAP Engine Client**: Develop a standard-compliant `DapClient` in `SpanCoder.Engine` to interface with debug engines like `netcoredbg` (.NET) or `lldb-vscode` (C++/Rust).
-* [x] **Debug Toolbar UI**: Create a floating, transparent overlay toolbar in the `ShellWindow`.
-* [x] **Gutter Breakpoint Hooks**: Update `TextEditorCanvas` mouse click events to detect gutter coordinates, toggling breakpoints.
-* [x] **Sidebar Tree Controls**: Add interactive sidebar panes for call stacks, threads, scopes, variables, and breakpoints list.
-
-### Phase 4: Resilient Embedded Terminal & Version Control
-* [x] **PTY Terminal Emulator**: Build a native cross-platform terminal control in `SpanCoder.Shell` that handles standard PTY streams (ConPTY on Windows, `/dev/ptmx` on macOS/Linux), rendering shell output in a terminal pane.
-* [x] **Git Version Control Provider**: Launch a background worker to query `git status` and highlight modified lines (added, edited, deleted) directly inside the editor gutter margin.
-* [x] **Source Control Pane**: Build a staging and commit sidebar, allowing staging of files, writing commit messages, and pushing branches.
-
-### Phase 5: NuGet Extension SDK & Marketplace Ecosystem
-* [x] **Contracts Assembly Extraction**: Publish `SpanCoder.Contracts` to NuGet to allow developers to write language or command extensions in separate projects.
-* [x] **Sandbox Plugin Launcher**: Spawn extensions inside a sandboxed environment, allowing them to access the editor state only through well-defined JSON-RPC protocols.
-* [x] **Extension Marketplace**: Build an extension browser panel in the IDE sidebar to search, install, and hot-reload plugins dynamically.
-* [x] **Out-of-Process Language Extensions**: Support system/backend language packs (C++, Rust, Go, Python) as external plugins communicating over JSON-RPC sockets.
+### Phase 3: Remote Development & Collaboration
+* [ ] **Remote Engine Host**: Allow `SpanCoder.App` to run locally while connecting to a remote `SpanCoder.Engine` daemon running on a Linux server or in a Docker DevContainer.
+* [ ] **Real-Time Collaborative Coding**: Synchronize piece-table buffers between multiple developers using low-latency CRDT (Conflict-free Replicated Data Types) protocols over WebSockets.
 
 ---
 

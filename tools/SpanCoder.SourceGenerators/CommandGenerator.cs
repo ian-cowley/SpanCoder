@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -16,12 +17,12 @@ namespace SpanCoder.SourceGenerators
             var methodProvider = context.SyntaxProvider.CreateSyntaxProvider(
                 predicate: (node, _) => node is MethodDeclarationSyntax m && m.AttributeLists.Count > 0,
                 transform: (ctx, _) => GetCommandMethodInfo(ctx)
-            ).Where(m => m != null);
+            ).Where(m => m != null).Select((m, _) => m!);
 
             var classProvider = context.SyntaxProvider.CreateSyntaxProvider(
                 predicate: (node, _) => node is ClassDeclarationSyntax c && c.AttributeLists.Count > 0,
                 transform: (ctx, _) => GetPluginClassInfo(ctx)
-            ).Where(c => c != null);
+            ).Where(c => c != null).Select((c, _) => c!);
 
             var combined = methodProvider.Collect().Combine(classProvider.Collect());
 
@@ -53,7 +54,7 @@ namespace SpanCoder.SourceGenerators
             var methodSymbol = context.SemanticModel.GetDeclaredSymbol(methodSyntax) as IMethodSymbol;
             if (methodSymbol == null) return null;
 
-            AttributeData commandAttr = null;
+            AttributeData? commandAttr = null;
             var menuItems = new List<AttributeData>();
 
             foreach (var attr in methodSymbol.GetAttributes())
@@ -209,7 +210,7 @@ namespace SpanCoder.Contracts
             var classSymbol = context.SemanticModel.GetDeclaredSymbol(classSyntax) as INamedTypeSymbol;
             if (classSymbol == null) return null;
 
-            AttributeData pluginAttr = null;
+            AttributeData? pluginAttr = null;
             var panelAttrs = new List<AttributeData>();
 
             foreach (var attr in classSymbol.GetAttributes())

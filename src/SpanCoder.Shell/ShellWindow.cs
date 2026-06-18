@@ -2737,13 +2737,13 @@ namespace SpanCoder.Shell
                     // Qwen2.5-Coder uses <|fim_prefix|>...<|fim_suffix|>...<|fim_middle|>
                     string prompt = $"<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>";
                     
-                    var requestBody = new
+                    var requestBody = new OllamaGenerateRequest
                     {
                         model = "qwen2.5-coder:1.5b",
                         prompt = prompt,
                         raw = true,
                         stream = false,
-                        options = new
+                        options = new OllamaOptions
                         {
                             num_predict = 64,
                             temperature = 0.0,
@@ -2751,7 +2751,7 @@ namespace SpanCoder.Shell
                         }
                     };
 
-                    string jsonRequest = System.Text.Json.JsonSerializer.Serialize(requestBody);
+                    string jsonRequest = System.Text.Json.JsonSerializer.Serialize(requestBody, OllamaJsonContext.Default.OllamaGenerateRequest);
                     var httpContent = new System.Net.Http.StringContent(jsonRequest, System.Text.Encoding.UTF8, "application/json");
 
                     var response = await client.PostAsync("http://127.0.0.1:11434/api/generate", httpContent);
@@ -3364,5 +3364,27 @@ namespace SpanCoder.Shell
                 }
             });
         }
+    }
+
+    public class OllamaGenerateRequest
+    {
+        public string model { get; set; } = "";
+        public string prompt { get; set; } = "";
+        public bool raw { get; set; }
+        public bool stream { get; set; }
+        public OllamaOptions? options { get; set; }
+    }
+
+    public class OllamaOptions
+    {
+        public int num_predict { get; set; }
+        public double temperature { get; set; }
+        public string[]? stop { get; set; }
+    }
+
+    [System.Text.Json.Serialization.JsonSerializable(typeof(OllamaGenerateRequest))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(OllamaOptions))]
+    internal partial class OllamaJsonContext : System.Text.Json.Serialization.JsonSerializerContext
+    {
     }
 }

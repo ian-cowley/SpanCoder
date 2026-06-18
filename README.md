@@ -147,6 +147,15 @@ graph TD
 * **Process Boundary Security**: Passes active buffers over the secure loopback TCP connection, utilizing a 3-second timeout guard to ensure host UI responsiveness.
 * **Fallback Smart Indenting**: Attempts to invoke `npx prettier` under the hood, with a built-in smart brace indenter fallback for JSON/JS/CSS to ensure instant formatting even without Node.js installed.
 
+### 21. HTML Live Previewer Plugin
+* **Real-Time Document Preview**: Allows developers to launch a live rendering pane that renders active HTML documents inside the main tab workspace.
+* **Typing Synchronization**: The preview pane automatically listens to editor updates, refreshing in real-time as the developer modifies the code, without requiring manual saves or page reloads.
+
+### 22. Interactive Extension Details & Settings Manager
+* **In-Tab Extension Details**: Clicking on any marketplace extension in the sidebar list opens a dedicated, interactive "Extension Details" document tab.
+* **Live Installation Management**: Provides instant "Install" and "Uninstall" action buttons that load or terminate out-of-process extension daemons dynamically.
+* **Dynamic Configuration Bindings**: Parses registered extension settings automatically, rendering interactive checkboxes for boolean toggles and input textboxes for string settings. Configuration changes are synchronized and written to `%APPDATA%/SpanCoder/settings.json` in real-time.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions

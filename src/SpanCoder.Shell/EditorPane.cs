@@ -243,5 +243,19 @@ namespace SpanCoder.Shell
                 Canvas.ScrollX = 0;
             }
         }
+
+        public FindReplaceOverlay? FindReplaceOverlay { get; set; }
+
+        public void ShowFindReplace(bool showReplace)
+        {
+            if (FindReplaceOverlay == null)
+            {
+                FindReplaceOverlay = new FindReplaceOverlay(this);
+                EditorGrid.Children.Add(FindReplaceOverlay);
+                Grid.SetRow(FindReplaceOverlay, 0);
+                Grid.SetColumn(FindReplaceOverlay, 0);
+            }
+            FindReplaceOverlay.Show(showReplace);
+        }
     }
 }

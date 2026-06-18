@@ -64,6 +64,10 @@ namespace SpanCoder.Shell
         private IExtensionManager? _extensionManager;
         private TabControl _sidebarTabControl = null!;
         private AiChatPanel _aiChatPanel = null!;
+        private FindReplaceFilesWindow? _findReplaceFilesWindow;
+        private TabControl _bottomTabControl = null!;
+        private TabItem _findResultsTab = null!;
+        private FindResultsPanel _findResultsPanel = null!;
         private Menu _mainMenu = null!;
         private StackPanel _toolbarPanel = null!;
         private readonly Dictionary<string, TextBlock> _pluginPanels = new();
@@ -689,7 +693,7 @@ namespace SpanCoder.Shell
             };
             _sidebarTabControl.Items.Add(aiTab);
 
-            RefreshExtensionsList();
+             RefreshExtensionsList();
 
             workspaceGrid.Children.Add(_sidebarTabControl);
             Grid.SetColumn(_sidebarTabControl, 0);
@@ -837,7 +841,7 @@ namespace SpanCoder.Shell
             Grid.SetRow(bottomSplitter, 1);
 
             // Row 3: Bottom Panel TabControl
-            var bottomTabControl = new TabControl
+            _bottomTabControl = new TabControl
             {
                 Background = new SolidColorBrush(Color.Parse("#1E1E1E")),
                 TabStripPlacement = Dock.Bottom
@@ -858,7 +862,7 @@ namespace SpanCoder.Shell
 
             var terminalControl = new TerminalControl();
             var terminalTab = new TabItem { Header = terminalTabHeader, Content = terminalControl };
-            bottomTabControl.Items.Add(terminalTab);
+            _bottomTabControl.Items.Add(terminalTab);
 
             var perfTabHeader = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2) };
             perfTabHeader.Children.Add(new Avalonia.Controls.Shapes.Path
@@ -875,10 +879,28 @@ namespace SpanCoder.Shell
 
             var perfControl = new PerformanceGraphsControl();
             var perfTab = new TabItem { Header = perfTabHeader, Content = perfControl };
-            bottomTabControl.Items.Add(perfTab);
+            _bottomTabControl.Items.Add(perfTab);
 
-            editorPane.Children.Add(bottomTabControl);
-            Grid.SetRow(bottomTabControl, 2);
+            // Find Results Tab
+            _findResultsPanel = new FindResultsPanel(this);
+            var findResultsTabHeader = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2) };
+            findResultsTabHeader.Children.Add(new Avalonia.Controls.Shapes.Path
+            {
+                Width = 12,
+                Height = 12,
+                Data = StreamGeometry.Parse("M15.5,14 L14.71,14 L14.43,13.72 C15.41,12.59 16,11.11 16,9.5 C16,5.91 13.09,3 9.5,3 C5.91,3 3,5.91 3,9.5 C3,13.09 5.91,16 9.5,16 C11.11,16 12.59,15.41 13.72,14.43 L14,14.71 L14,15.5 L19,20.5 L20.5,19 L15.5,14 Z"),
+                Fill = new SolidColorBrush(Color.Parse("#81D4FA")),
+                Stretch = Stretch.Uniform,
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            findResultsTabHeader.Children.Add(new TextBlock { Text = "Find Results", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+
+            _findResultsTab = new TabItem { Header = findResultsTabHeader, Content = _findResultsPanel };
+            _bottomTabControl.Items.Add(_findResultsTab);
+
+            editorPane.Children.Add(_bottomTabControl);
+            Grid.SetRow(_bottomTabControl, 2);
 
             // Start the PTY process
             _terminalPty = new PtyHost();
@@ -2811,6 +2833,118 @@ namespace SpanCoder.Shell
             window.ExecutePaste();
         }
 
+        [Command("Edit.Find", "Quick Find", "Edit", "Ctrl+F")]
+        [MenuItem("Edit.Find", "Edit/Quick Find", 60)]
+        public static void FindCommand(ShellWindow window)
+        {
+            window._activePane.ShowFindReplace(showReplace: false);
+        }
+
+        [Command("Edit.Replace", "Quick Replace", "Edit", "Ctrl+H")]
+        [MenuItem("Edit.Replace", "Edit/Quick Replace", 70)]
+        public static void ReplaceCommand(ShellWindow window)
+        {
+            window._activePane.ShowFindReplace(showReplace: true);
+        }
+
+        [Command("Edit.FindInFiles", "Find in Files", "Edit", "Ctrl+Shift+F")]
+        [MenuItem("Edit.FindInFiles", "Edit/Find in Files", 71)]
+        public static void FindInFilesCommand(ShellWindow window)
+        {
+            window.ShowFindReplaceFilesWindow(showReplace: false);
+        }
+
+        [Command("Edit.ReplaceInFiles", "Replace in Files", "Edit", "Ctrl+Shift+H")]
+        [MenuItem("Edit.ReplaceInFiles", "Edit/Replace in Files", 72)]
+        public static void ReplaceInFilesCommand(ShellWindow window)
+        {
+            window.ShowFindReplaceFilesWindow(showReplace: true);
+        }
+
+        public void ShowFindReplaceFilesWindow(bool showReplace)
+        {
+            if (_findReplaceFilesWindow == null)
+            {
+                _findReplaceFilesWindow = new FindReplaceFilesWindow(this, showReplace);
+                _findReplaceFilesWindow.Closed += (s, e) => _findReplaceFilesWindow = null;
+                _findReplaceFilesWindow.Show(this);
+            }
+            else
+            {
+                _findReplaceFilesWindow.FocusSearch(selectedText(this), showReplace);
+                _findReplaceFilesWindow.Activate();
+            }
+        }
+
+        public void DisplayWorkspaceSearchResults(string query, List<Glacier.Grep.SearchResult> results)
+        {
+            _findResultsPanel.DisplayResults(query, results, WorkspaceRootPath ?? "");
+            _bottomTabControl.SelectedItem = _findResultsTab;
+        }
+
+        private static string? selectedText(ShellWindow window)
+        {
+            string sel = window._canvas.GetSelectedText(out _, out _);
+            return (string.IsNullOrEmpty(sel) || sel.Contains('\n') || sel.Contains('\r')) ? null : sel;
+        }
+
+        public void ReplaceWorkspaceMatches(string findText, string replaceText, bool caseSensitive)
+        {
+            string? wsPath = WorkspaceRootPath;
+            if (string.IsNullOrEmpty(wsPath)) return;
+
+            string scanRoot = wsPath;
+            if (File.Exists(wsPath))
+            {
+                scanRoot = Path.GetDirectoryName(wsPath) ?? wsPath;
+            }
+
+            try
+            {
+                var searchEngine = new Glacier.Grep.SearchEngine(scanRoot);
+                var results = searchEngine.SearchAsync(findText, caseSensitive: caseSensitive)
+                    .GetAwaiter().GetResult();
+
+                var fileGroups = results.GroupBy(r => Path.GetFullPath(Path.Combine(scanRoot, r.FilePath)));
+
+                foreach (var group in fileGroups)
+                {
+                    string fullPath = group.Key;
+                    var panesWithDoc = _editorPanes.Where(p => p.OpenDocuments.Any(d => string.Equals(d.FilePath, fullPath, StringComparison.OrdinalIgnoreCase))).ToList();
+
+                    if (panesWithDoc.Count > 0)
+                    {
+                        foreach (var pane in panesWithDoc)
+                        {
+                            pane.Canvas.ReplaceAllMatches(replaceText);
+                        }
+                    }
+                    else
+                    {
+                        if (File.Exists(fullPath))
+                        {
+                            string content = File.ReadAllText(fullPath);
+                            string newContent;
+                            if (caseSensitive)
+                            {
+                                newContent = content.Replace(findText, replaceText);
+                            }
+                            else
+                            {
+                                string escapedFind = System.Text.RegularExpressions.Regex.Escape(findText);
+                                newContent = System.Text.RegularExpressions.Regex.Replace(content, escapedFind, replaceText, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                            }
+                            File.WriteAllText(fullPath, newContent, System.Text.Encoding.UTF8);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ShellWindow] ReplaceWorkspaceMatches error: {ex.Message}");
+            }
+        }
+
         public async void ExecuteCut()
         {
             if (_canvas.Document == null || _engine == null) return;
@@ -3106,15 +3240,25 @@ namespace SpanCoder.Shell
                                 string completion = respProp.GetString() ?? "";
                                 if (!string.IsNullOrEmpty(completion))
                                 {
-                                    Dispatcher.UIThread.Post(() =>
+                                    completion = completion.TrimStart('\r', '\n');
+                                    int nlIdx = completion.IndexOfAny(new[] { '\r', '\n' });
+                                    if (nlIdx >= 0)
                                     {
-                                        if (_canvas.GetCaretAbsoluteOffset() == caretOffset)
+                                        completion = completion.Substring(0, nlIdx);
+                                    }
+
+                                    if (!string.IsNullOrEmpty(completion))
+                                    {
+                                        Dispatcher.UIThread.Post(() =>
                                         {
-                                            _canvas.GhostText = completion;
-                                            _canvas.GhostTextOffset = caretOffset;
-                                            _canvas.InvalidateVisual();
-                                        }
-                                    });
+                                            if (_canvas.GetCaretAbsoluteOffset() == caretOffset)
+                                            {
+                                                _canvas.GhostText = completion;
+                                                _canvas.GhostTextOffset = caretOffset;
+                                                _canvas.InvalidateVisual();
+                                            }
+                                        });
+                                    }
                                 }
                             }
                         }

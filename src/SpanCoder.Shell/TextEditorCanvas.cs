@@ -147,6 +147,14 @@ namespace SpanCoder.Shell
         private int _selectionEndOffset = -1;
         public int SelectionStartOffset => _selectionStartOffset;
         public int SelectionEndOffset => _selectionEndOffset;
+
+        private readonly System.Collections.Generic.List<(int Start, int End)> _searchMatches = new();
+        private int _activeSearchMatchIndex = -1;
+        private string _searchQuery = "";
+
+        public System.Collections.Generic.IReadOnlyList<(int Start, int End)> SearchMatches => _searchMatches;
+        public int ActiveSearchMatchIndex => _activeSearchMatchIndex;
+        public string SearchQuery => _searchQuery;
         private bool _isDragging;
         private bool _isBlockDragging;
         private int _blockDragStartLine;
@@ -276,7 +284,24 @@ namespace SpanCoder.Shell
         }
 
         public bool IsAutocompleteVisible { get; set; }
-        public string? GhostText { get; set; }
+        private string? _ghostText;
+        public string? GhostText
+        {
+            get => _ghostText;
+            set
+            {
+                if (value != null)
+                {
+                    value = value.TrimStart('\r', '\n');
+                    int nlIdx = value.IndexOfAny(new[] { '\r', '\n' });
+                    if (nlIdx >= 0)
+                    {
+                        value = value.Substring(0, nlIdx);
+                    }
+                }
+                _ghostText = value;
+            }
+        }
         public int GhostTextOffset { get; set; } = -1;
 
         public event Action<int, string>? TextInputReceived;
@@ -758,7 +783,137 @@ namespace SpanCoder.Shell
                 UpdateLineStates(0);
                 RecomputeFoldingRanges();
                 UpdateFoldingLayout();
+                RefreshSearchMatches();
             }
+        }
+
+        public void SetSelection(int start, int end)
+        {
+            _selectionStartOffset = start;
+            _selectionEndOffset = end;
+            InvalidateVisual();
+        }
+
+        public void ClearSelection()
+        {
+            _selectionStartOffset = -1;
+            _selectionEndOffset = -1;
+            InvalidateVisual();
+        }
+
+        public void UpdateSearchQuery(string query)
+        {
+            if (_searchQuery != query)
+            {
+                _searchQuery = query ?? "";
+                RefreshSearchMatches();
+            }
+        }
+
+        public void ClearSearchMatches()
+        {
+            _searchQuery = "";
+            _searchMatches.Clear();
+            _activeSearchMatchIndex = -1;
+            InvalidateVisual();
+        }
+
+        public void RefreshSearchMatches()
+        {
+            _searchMatches.Clear();
+            if (string.IsNullOrEmpty(_searchQuery) || Document == null)
+            {
+                _activeSearchMatchIndex = -1;
+                InvalidateVisual();
+                return;
+            }
+
+            try
+            {
+                string docText = Document.GetTextRange(0, Document.Length);
+                int idx = 0;
+                while (true)
+                {
+                    idx = docText.IndexOf(_searchQuery, idx, StringComparison.OrdinalIgnoreCase);
+                    if (idx < 0) break;
+                    _searchMatches.Add((idx, idx + _searchQuery.Length));
+                    idx += _searchQuery.Length;
+                }
+            }
+            catch
+            {
+                // Fallback / fail silently
+            }
+
+            if (_searchMatches.Count > 0)
+            {
+                int caretOffset = GetCaretAbsoluteOffset();
+                int bestIdx = _searchMatches.FindIndex(m => m.Start >= caretOffset);
+                if (bestIdx < 0) bestIdx = 0;
+                _activeSearchMatchIndex = bestIdx;
+            }
+            else
+            {
+                _activeSearchMatchIndex = -1;
+            }
+            InvalidateVisual();
+        }
+
+        public void FindNextMatch()
+        {
+            if (_searchMatches.Count == 0) return;
+            _activeSearchMatchIndex = (_activeSearchMatchIndex + 1) % _searchMatches.Count;
+            FocusActiveMatch();
+        }
+
+        public void FindPrevMatch()
+        {
+            if (_searchMatches.Count == 0) return;
+            _activeSearchMatchIndex = (_activeSearchMatchIndex - 1 + _searchMatches.Count) % _searchMatches.Count;
+            FocusActiveMatch();
+        }
+
+        private void FocusActiveMatch()
+        {
+            if (_activeSearchMatchIndex < 0 || _activeSearchMatchIndex >= _searchMatches.Count) return;
+            var match = _searchMatches[_activeSearchMatchIndex];
+            MoveCaretToOffset(match.Start);
+            SetSelection(match.Start, match.End);
+            EnsureCaretVisible();
+            InvalidateVisual();
+        }
+
+        public void ReplaceActiveMatch(string replaceText)
+        {
+            if (_activeSearchMatchIndex < 0 || _activeSearchMatchIndex >= _searchMatches.Count) return;
+            var match = _searchMatches[_activeSearchMatchIndex];
+            
+            BatchEditReceived?.Invoke(new[]
+            {
+                new TextEdit
+                {
+                    Offset = match.Start,
+                    DeleteLength = match.End - match.Start,
+                    Text = replaceText ?? ""
+                }
+            });
+        }
+
+        public void ReplaceAllMatches(string replaceText)
+        {
+            if (_searchMatches.Count == 0) return;
+
+            var edits = _searchMatches
+                .OrderByDescending(m => m.Start)
+                .Select(m => new TextEdit
+                {
+                    Offset = m.Start,
+                    DeleteLength = m.End - m.Start,
+                    Text = replaceText ?? ""
+                })
+                .ToArray();
+
+            BatchEditReceived?.Invoke(edits);
         }
 
         private void UpdateLineStates(int startLineIndex)
@@ -1689,6 +1844,35 @@ namespace SpanCoder.Shell
                 int renderLen = lineSpan.Length;
                 if (renderLen > 0 && lineSpan[renderLen - 1] == '\n') renderLen--;
                 if (renderLen > 0 && lineSpan[renderLen - 1] == '\r') renderLen--;
+
+                // --- Draw Search Highlights ---
+                for (int matchIdx = 0; matchIdx < _searchMatches.Count; matchIdx++)
+                {
+                    var match = _searchMatches[matchIdx];
+                    long lineStartOffset = doc.GetLineStart(i);
+                    long lineEndOffset = (i + 1 < lineCount) ? doc.GetLineStart(i + 1) : doc.Length;
+                    if (lineStartOffset < match.End && lineEndOffset > match.Start)
+                    {
+                        int selStartInLine = Math.Max((int)lineStartOffset, match.Start) - (int)lineStartOffset;
+                        int selEndInLine = Math.Min((int)lineEndOffset, match.End) - (int)lineStartOffset;
+
+                        int startCol = Math.Min(renderLen, selStartInLine);
+                        int endCol = Math.Min(renderLen, selEndInLine);
+
+                        double startX = gutterWidth + 10 + startCol * CharWidth - ScrollX;
+                        double endX = gutterWidth + 10 + endCol * CharWidth - ScrollX;
+
+                        if (endX > startX)
+                        {
+                            double y = (v * LineHeight) - ScrollY;
+                            bool isActive = matchIdx == _activeSearchMatchIndex;
+                            IBrush highlightBrush = isActive 
+                                ? new SolidColorBrush(Color.FromArgb(120, 255, 215, 0)) // Bright Gold
+                                : new SolidColorBrush(Color.FromArgb(60, 255, 165, 0)); // Translucent Orange
+                            context.FillRectangle(highlightBrush, new Rect(startX, y, endX - startX, LineHeight));
+                        }
+                    }
+                }
 
                 // --- Draw Selection Highlight ---
                 int minOffset = Math.Min(_selectionStartOffset, _selectionEndOffset);

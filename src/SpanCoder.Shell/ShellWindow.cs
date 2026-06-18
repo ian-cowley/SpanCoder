@@ -1710,6 +1710,7 @@ namespace SpanCoder.Shell
                                     RebuildTabsUI(_activePane);
                                     _activePane.UpdateScrollbars();
                                     RequestLspFoldingRanges(docId);
+                                    TriggerHtmlPreviewUpdate();
                                 }
                                 else
                                 {
@@ -1729,6 +1730,7 @@ namespace SpanCoder.Shell
                                             if (pane == _activePane)
                                             {
                                                 pane.Canvas.AdjustCaret(offset, addedLength, deletedLength);
+                                                TriggerHtmlPreviewUpdate();
                                             }
                                         }
                                         RebuildTabsUI(pane);
@@ -2432,6 +2434,7 @@ namespace SpanCoder.Shell
             UpdateStatusBar();
             UpdateEditMenuState();
             UpdateInlayHintsAndCodeLens();
+            TriggerHtmlPreviewUpdate();
         }
 
         public string GetDocumentText(IDocumentView doc)
@@ -4030,8 +4033,16 @@ namespace SpanCoder.Shell
                                 string cmdId = BinaryMessageSerializer.ParseExecuteExtensionCommand(payload);
                                 if (cmdId == "html-preview.show")
                                 {
-                                    // Send Panel Update!
-                                    string content = "<h1>HTML Live Preview</h1><p>Previewing current workspace files...</p><ul><li>index.html</li><li>style.css</li></ul>";
+                                    // Send Panel Update with real document content!
+                                    string content = await Dispatcher.UIThread.InvokeAsync(() =>
+                                    {
+                                        if (_activeDocument != null && _activeDocument.Document != null)
+                                        {
+                                            return GetDocumentText(_activeDocument.Document);
+                                        }
+                                        return "<h1>No active document</h1><p>Open an HTML file to preview it.</p>";
+                                    });
+
                                     byte[] contentBuf = new byte[BinaryMessageSerializer.HeaderSize + 8 + "html-preview-panel".Length * sizeof(char) + content.Length * sizeof(char)];
                                     int written = BinaryMessageSerializer.WriteUpdateExtensionPanel(contentBuf, "html-preview-panel", content);
                                     
@@ -4069,6 +4080,39 @@ namespace SpanCoder.Shell
                 connection.Cts.Cancel();
                 connection.Client.Close();
                 _mockExtensionConnections.Remove(extId);
+            }
+        }
+
+        private async System.Threading.Tasks.Task SendMockExtensionPanelUpdate(string extId, string panelId, string content)
+        {
+            if (_mockExtensionConnections.TryGetValue(extId, out var conn) && conn.Client.Connected)
+            {
+                try
+                {
+                    var stream = conn.Client.GetStream();
+                    byte[] contentBuf = new byte[BinaryMessageSerializer.HeaderSize + 8 + panelId.Length * sizeof(char) + content.Length * sizeof(char)];
+                    int written = BinaryMessageSerializer.WriteUpdateExtensionPanel(contentBuf, panelId, content);
+                    await stream.WriteAsync(contentBuf.AsMemory(0, written));
+                    await stream.FlushAsync();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ShellWindow] Failed to send mock panel update: {ex.Message}");
+                }
+            }
+        }
+
+        private void TriggerHtmlPreviewUpdate()
+        {
+            if (_mockExtensionConnections.ContainsKey("html-preview") && _activeDocument != null && _activeDocument.Document != null)
+            {
+                string path = _activeDocument.FilePath;
+                string ext = System.IO.Path.GetExtension(path) ?? "";
+                if (ext.Equals(".html", StringComparison.OrdinalIgnoreCase) || ext.Equals(".htm", StringComparison.OrdinalIgnoreCase))
+                {
+                    string content = GetDocumentText(_activeDocument.Document);
+                    _ = SendMockExtensionPanelUpdate("html-preview", "html-preview-panel", content);
+                }
             }
         }
 

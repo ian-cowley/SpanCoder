@@ -79,7 +79,10 @@ namespace SpanCoder.Shell
         private double _lastHoverMouseY;
         private (string FilePath, int Line, int Character)? _pendingNavigation;
         private DispatcherTimer? _ghostTextTimer;
-        private System.Net.Http.HttpClient? _httpClient;
+        private static readonly System.Net.Http.SocketsHttpHandler _socketsHandler = new()
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(1)
+        };
 
         private readonly Dictionary<string, List<Control>> _extensionUiElements = new();
         private readonly Dictionary<string, List<KeyBinding>> _extensionKeyBindings = new();
@@ -2726,7 +2729,10 @@ namespace SpanCoder.Shell
                     string suffix = doc.GetTextRange(caretOffset, suffixLen);
 
                     // 2. Call Ollama
-                    _httpClient ??= new System.Net.Http.HttpClient();
+                    using var client = new System.Net.Http.HttpClient(_socketsHandler, disposeHandler: false)
+                    {
+                        Timeout = TimeSpan.FromSeconds(2)
+                    };
 
                     // Qwen2.5-Coder uses <|fim_prefix|>...<|fim_suffix|>...<|fim_middle|>
                     string prompt = $"<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>";
@@ -2748,8 +2754,7 @@ namespace SpanCoder.Shell
                     string jsonRequest = System.Text.Json.JsonSerializer.Serialize(requestBody);
                     var httpContent = new System.Net.Http.StringContent(jsonRequest, System.Text.Encoding.UTF8, "application/json");
 
-                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    var response = await _httpClient.PostAsync("http://127.0.0.1:11434/api/generate", httpContent, cts.Token);
+                    var response = await client.PostAsync("http://127.0.0.1:11434/api/generate", httpContent);
                     if (response.IsSuccessStatusCode)
                     {
                         var jsonResponse = await response.Content.ReadAsStringAsync();
@@ -2783,13 +2788,15 @@ namespace SpanCoder.Shell
 
         private async Task CheckAndSetupLocalAiAsync()
         {
-            _httpClient ??= new System.Net.Http.HttpClient();
-            using var checkCts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
+            using var client = new System.Net.Http.HttpClient(_socketsHandler, disposeHandler: false)
+            {
+                Timeout = TimeSpan.FromSeconds(3)
+            };
             try
             {
                 UpdateStatusBarText("AI: Checking local Ollama...");
 
-                var response = await _httpClient.GetAsync("http://127.0.0.1:11434/api/tags", checkCts.Token);
+                var response = await client.GetAsync("http://127.0.0.1:11434/api/tags");
                 if (!response.IsSuccessStatusCode)
                 {
                     Console.WriteLine($"[ShellWindow] Ollama api/tags returned non-success: {response.StatusCode} - {response.ReasonPhrase}");
@@ -2811,8 +2818,11 @@ namespace SpanCoder.Shell
                 UpdateStatusBarText("AI: Downloading qwen2.5-coder:1.5b (900MB)...");
                 
                 var pullContent = new System.Net.Http.StringContent("{\"name\": \"qwen2.5-coder:1.5b\", \"stream\": false}", System.Text.Encoding.UTF8, "application/json");
-                using var pullCts = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(10));
-                var pullResponse = await _httpClient.PostAsync("http://127.0.0.1:11434/api/pull", pullContent, pullCts.Token);
+                using var pullClient = new System.Net.Http.HttpClient(_socketsHandler, disposeHandler: false)
+                {
+                    Timeout = TimeSpan.FromMinutes(10)
+                };
+                var pullResponse = await pullClient.PostAsync("http://127.0.0.1:11434/api/pull", pullContent);
                 if (pullResponse.IsSuccessStatusCode)
                 {
                     UpdateStatusBarText("AI: qwen2.5-coder:1.5b ready");

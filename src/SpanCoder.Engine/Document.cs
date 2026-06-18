@@ -42,14 +42,24 @@ namespace SpanCoder.Engine
             PieceTable.Delete(offset, length);
         }
 
-        public int GetLineCount() => LineIndex.Count;
+        public int GetLineCount() => LineIndex?.Count ?? 0;
 
-        public long GetLineStart(int lineIndex) => LineIndex.GetLineStart(lineIndex);
+        public long GetLineStart(int lineIndex)
+        {
+            if (LineIndex == null) return 0;
+            if (lineIndex < 0 || lineIndex >= LineIndex.Count)
+                throw new ArgumentOutOfRangeException(nameof(lineIndex));
+            return LineIndex.GetLineStart(lineIndex);
+        }
 
         public ReadOnlySpan<char> GetLine(int lineIndex, out bool isContiguous, out char[]? rentedBuffer)
         {
-            if (lineIndex < 0 || lineIndex >= LineIndex.Count)
-                throw new ArgumentOutOfRangeException(nameof(lineIndex));
+            if (LineIndex == null || PieceTable == null || lineIndex < 0 || lineIndex >= LineIndex.Count)
+            {
+                isContiguous = true;
+                rentedBuffer = null;
+                return ReadOnlySpan<char>.Empty;
+            }
 
             long start = LineIndex.GetLineStart(lineIndex);
             long end = (lineIndex + 1 < LineIndex.Count) ? LineIndex.GetLineStart(lineIndex + 1) : PieceTable.Length;

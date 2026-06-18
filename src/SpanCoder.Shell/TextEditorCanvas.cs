@@ -1771,7 +1771,11 @@ namespace SpanCoder.Shell
             double height = Bounds.Height;
 
             int lineCount = doc!.GetLineCount();
+            if (lineCount <= 0)
+                return;
             int visibleLineCount = _visibleLines.Count > 0 ? _visibleLines.Count : lineCount;
+            if (visibleLineCount <= 0)
+                return;
             double gutterWidth = GetGutterWidth();
 
             // Calculate visible line range

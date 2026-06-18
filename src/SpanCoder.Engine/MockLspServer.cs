@@ -261,7 +261,7 @@ namespace SpanCoder.Engine
                 string line = lines[idx];
                 string trimmed = line.Trim();
 
-                if (idx > startIndex && parens == 0 && braces == 0 && brackets == 0)
+                if (idx > startIndex && !inString && !inChar && parens == 0 && braces == 0 && brackets == 0)
                 {
                     if (trimmed.StartsWith("public ", StringComparison.Ordinal) ||
                         trimmed.StartsWith("private ", StringComparison.Ordinal) ||

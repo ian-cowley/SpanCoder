@@ -27,7 +27,7 @@ git commit -m "Initial Commit: SpanCoder IDE Core v1.0.0.0"
 
 ### 5. Link and Push
 ```powershell
-git remote add origin https://github.com/ian-cowley/Glacier.SpanCoder.git
+git remote add origin https://github.com/ian-cowley/SpanCoder.git
 git branch -M main
 git push -u origin main
 ```

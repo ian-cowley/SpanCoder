@@ -229,6 +229,8 @@ namespace SpanCoder.Shell
         }
 
         public bool IsAutocompleteVisible { get; set; }
+        public string? GhostText { get; set; }
+        public int GhostTextOffset { get; set; } = -1;
 
         public event Action<int, string>? TextInputReceived;
         public event Action<int, int>? TextDeleteReceived;
@@ -958,6 +960,41 @@ namespace SpanCoder.Shell
                 e.Handled = true;
                 return;
             }
+
+            if (e.Key == Key.Tab && !string.IsNullOrEmpty(GhostText) && CaretAbsoluteOffset == GhostTextOffset)
+            {
+                LogHelper.Log($"[TextEditorCanvas] Intercepted Tab key to accept GhostText: '{GhostText}'");
+                string acceptedText = GhostText;
+                int offset = GhostTextOffset;
+                GhostText = null;
+                GhostTextOffset = -1;
+                InvalidateVisual();
+                TextInputReceived?.Invoke(offset, acceptedText);
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key == Key.Escape && !string.IsNullOrEmpty(GhostText))
+            {
+                LogHelper.Log("[TextEditorCanvas] Intercepted Escape to clear GhostText");
+                GhostText = null;
+                GhostTextOffset = -1;
+                InvalidateVisual();
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key != Key.LeftCtrl && e.Key != Key.RightCtrl &&
+                e.Key != Key.LeftAlt && e.Key != Key.RightAlt &&
+                e.Key != Key.LeftShift && e.Key != Key.RightShift)
+            {
+                if (GhostText != null)
+                {
+                    GhostText = null;
+                    GhostTextOffset = -1;
+                    InvalidateVisual();
+                }
+            }
             if (IsAutocompleteVisible)
             {
                 if (e.Key == Key.Up)
@@ -1268,6 +1305,12 @@ namespace SpanCoder.Shell
         {
             base.OnTextInput(e);
             LogHelper.Log($"[TextEditorCanvas] OnTextInput: text='{e.Text}', mainCaretOffset={GetCaretAbsoluteOffset()}, extraCaretsCount={_extraCarets.Count}");
+            if (GhostText != null)
+            {
+                GhostText = null;
+                GhostTextOffset = -1;
+                InvalidateVisual();
+            }
             if (Document == null || string.IsNullOrEmpty(e.Text) || e.Text == "\r" || e.Text == "\n")
                 return;
 
@@ -1497,11 +1540,21 @@ namespace SpanCoder.Shell
                     }
                 }
 
-                if (renderLen > 0)
+                bool hasGhost = i == CaretLine && !string.IsNullOrEmpty(GhostText) && CaretAbsoluteOffset == GhostTextOffset;
+                if (renderLen > 0 || hasGhost)
                 {
-                    string textStr = lineSpan.Slice(0, renderLen).ToString();
+                    string textStr = renderLen > 0 ? lineSpan.Slice(0, renderLen).ToString() : "";
+                    string renderText = textStr;
+                    int ghostIndex = 0;
+                    if (hasGhost)
+                    {
+                        int caretColClamped = Math.Max(0, Math.Min(CaretCol, textStr.Length));
+                        renderText = textStr.Substring(0, caretColClamped) + GhostText + textStr.Substring(caretColClamped);
+                        ghostIndex = caretColClamped;
+                    }
+
                     var formatted = new FormattedText(
-                        textStr,
+                        renderText,
                         CultureInfo.InvariantCulture,
                         FlowDirection.LeftToRight,
                         _typeface,
@@ -1509,16 +1562,31 @@ namespace SpanCoder.Shell
                         Brushes.LightGray
                     );
 
-                    LineState startState = i > 0 && (i - 1) < _lineStates.Count ? _lineStates[i - 1] : LineState.Normal;
-                    string extension = System.IO.Path.GetExtension(doc.FilePath ?? "");
-                    var lexer = new DocumentLexer(lineSpan.Slice(0, renderLen), extension, startState);
-                    while (lexer.NextToken(out var token, out var nextState))
+                    if (renderLen > 0)
                     {
-                        var brush = GetTokenBrush(token.Type);
-                        if (brush != null)
+                        LineState startState = i > 0 && (i - 1) < _lineStates.Count ? _lineStates[i - 1] : LineState.Normal;
+                        string extension = System.IO.Path.GetExtension(doc.FilePath ?? "");
+                        var lexer = new DocumentLexer(lineSpan.Slice(0, renderLen), extension, startState);
+                        while (lexer.NextToken(out var token, out var nextState))
                         {
-                            formatted.SetForegroundBrush(brush, token.Start, token.Length);
+                            var brush = GetTokenBrush(token.Type);
+                            if (brush != null)
+                            {
+                                if (hasGhost && token.Start >= ghostIndex)
+                                {
+                                    formatted.SetForegroundBrush(brush, token.Start + GhostText!.Length, token.Length);
+                                }
+                                else
+                                {
+                                    formatted.SetForegroundBrush(brush, token.Start, token.Length);
+                                }
+                            }
                         }
+                    }
+
+                    if (hasGhost)
+                    {
+                        formatted.SetForegroundBrush(new SolidColorBrush(Color.Parse("#707070")), ghostIndex, GhostText!.Length);
                     }
 
                     // Offset text by gutter width

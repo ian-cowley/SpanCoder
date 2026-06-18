@@ -75,6 +75,14 @@ namespace SpanCoder.Engine
             return rentedBuffer.AsSpan(0, length);
         }
 
+        public string GetTextRange(int offset, int length)
+        {
+            if (length <= 0) return "";
+            char[] buffer = new char[length];
+            PieceTable.GetText(offset, length, buffer);
+            return new string(buffer);
+        }
+
         public void Dispose()
         {
             PieceTable?.Dispose();

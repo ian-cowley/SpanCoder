@@ -78,6 +78,8 @@ namespace SpanCoder.Shell
         private double _lastHoverMouseX;
         private double _lastHoverMouseY;
         private (string FilePath, int Line, int Character)? _pendingNavigation;
+        private DispatcherTimer? _ghostTextTimer;
+        private System.Net.Http.HttpClient? _httpClient;
 
         private readonly Dictionary<string, List<Control>> _extensionUiElements = new();
         private readonly Dictionary<string, List<KeyBinding>> _extensionKeyBindings = new();
@@ -931,6 +933,7 @@ namespace SpanCoder.Shell
             UpdateStatusBar();
             UpdateEditMenuState();
             StartGitMonitoring();
+            StartLocalAiMonitoring();
         }
 
         public void ConnectEngine(IEngineConnection engine)
@@ -2674,10 +2677,174 @@ namespace SpanCoder.Shell
             }
         }
 
+        private void StartLocalAiMonitoring()
+        {
+            _ghostTextTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+            _ghostTextTimer.Tick += OnGhostTextTimerTick;
+
+            _canvas.CaretMoved += ResetGhostTextTimer;
+
+            // Run check and pull setup in the background
+            Task.Run(async () =>
+            {
+                await CheckAndSetupLocalAiAsync();
+            });
+        }
+
+        private void ResetGhostTextTimer()
+        {
+            _ghostTextTimer?.Stop();
+            // Only trigger completion if there is an active document, no selection, and no multiple carets
+            if (_activeDocument != null && _canvas.ExtraCarets.Count == 0 && _canvas.GhostText == null)
+            {
+                _ghostTextTimer?.Start();
+            }
+        }
+
+        private void OnGhostTextTimerTick(object? sender, EventArgs e)
+        {
+            _ghostTextTimer?.Stop();
+            if (_activeDocument == null || _canvas.Document == null || _canvas.ExtraCarets.Count > 0) return;
+
+            var doc = _canvas.Document;
+            int caretOffset = _canvas.GetCaretAbsoluteOffset();
+            string filePath = doc.FilePath ?? "";
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    // 1. Extract context before and after caret
+                    int prefixLen = Math.Min(caretOffset, 1000);
+                    int prefixStart = caretOffset - prefixLen;
+                    string prefix = doc.GetTextRange(prefixStart, prefixLen);
+
+                    int suffixLen = Math.Min(doc.Length - caretOffset, 500);
+                    string suffix = doc.GetTextRange(caretOffset, suffixLen);
+
+                    // 2. Call Ollama
+                    _httpClient ??= new System.Net.Http.HttpClient();
+                    _httpClient.Timeout = TimeSpan.FromSeconds(2); // Keep it fast
+
+                    // Qwen2.5-Coder uses <|fim_prefix|>...<|fim_suffix|>...<|fim_middle|>
+                    string prompt = $"<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>";
+                    
+                    var requestBody = new
+                    {
+                        model = "qwen2.5-coder:1.5b",
+                        prompt = prompt,
+                        raw = true,
+                        stream = false,
+                        options = new
+                        {
+                            num_predict = 64,
+                            temperature = 0.0,
+                            stop = new[] { "<|fim_prefix|>", "<|fim_suffix|>", "<|fim_middle|>", "<|endoftext|>", "\n", "\r\n" }
+                        }
+                    };
+
+                    string jsonRequest = System.Text.Json.JsonSerializer.Serialize(requestBody);
+                    var httpContent = new System.Net.Http.StringContent(jsonRequest, System.Text.Encoding.UTF8, "application/json");
+
+                    var response = await _httpClient.PostAsync("http://localhost:11434/api/generate", httpContent);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var jsonResponse = await response.Content.ReadAsStringAsync();
+                        using (var jsonDoc = System.Text.Json.JsonDocument.Parse(jsonResponse))
+                        {
+                            if (jsonDoc.RootElement.TryGetProperty("response", out var respProp))
+                            {
+                                string completion = respProp.GetString() ?? "";
+                                if (!string.IsNullOrEmpty(completion))
+                                {
+                                    Dispatcher.UIThread.Post(() =>
+                                    {
+                                        if (_canvas.GetCaretAbsoluteOffset() == caretOffset)
+                                        {
+                                            _canvas.GhostText = completion;
+                                            _canvas.GhostTextOffset = caretOffset;
+                                            _canvas.InvalidateVisual();
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fail silently for completion requests
+                }
+            });
+        }
+
+        private async Task CheckAndSetupLocalAiAsync()
+        {
+            _httpClient ??= new System.Net.Http.HttpClient();
+            _httpClient.Timeout = TimeSpan.FromSeconds(3);
+            try
+            {
+                UpdateStatusBarText("AI: Checking local Ollama...");
+
+                var response = await _httpClient.GetAsync("http://localhost:11434/api/tags");
+                if (!response.IsSuccessStatusCode)
+                {
+                    UpdateStatusBarText("AI Offline: Local Ollama returned error.");
+                    return;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                
+                // Extremely simple check using string contains, to avoid JSON library parsing errors
+                bool modelExists = content.Contains("qwen2.5-coder:1.5b");
+                if (modelExists)
+                {
+                    UpdateStatusBarText("AI: qwen2.5-coder:1.5b ready");
+                    return;
+                }
+
+                // If not exists, pull it in the background
+                UpdateStatusBarText("AI: Downloading qwen2.5-coder:1.5b (900MB)...");
+                
+                var pullContent = new System.Net.Http.StringContent("{\"name\": \"qwen2.5-coder:1.5b\", \"stream\": false}", System.Text.Encoding.UTF8, "application/json");
+                _httpClient.Timeout = TimeSpan.FromMinutes(10); // Give pull plenty of time
+                var pullResponse = await _httpClient.PostAsync("http://localhost:11434/api/pull", pullContent);
+                if (pullResponse.IsSuccessStatusCode)
+                {
+                    UpdateStatusBarText("AI: qwen2.5-coder:1.5b ready");
+                }
+                else
+                {
+                    UpdateStatusBarText("AI: Download failed. Run 'ollama pull qwen2.5-coder:1.5b' manually.");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Log($"[ShellWindow] Ollama check failed: {ex.Message}");
+                UpdateStatusBarText("AI Offline: Run 'ollama run qwen2.5-coder:1.5b'");
+            }
+        }
+
+        private void UpdateStatusBarText(string text)
+        {
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                _statusBar.Text = text;
+            }
+            else
+            {
+                Dispatcher.UIThread.Post(() => _statusBar.Text = text);
+            }
+        }
+
         protected override void OnClosed(EventArgs e)
         {
             base.OnClosed(e);
             _gitTimer?.Stop();
+            _ghostTextTimer?.Stop();
             _terminalPty?.Dispose();
             foreach (var extId in _mockExtensionConnections.Keys.ToList())
             {

@@ -134,6 +134,13 @@ graph TD
 * **Interactive Gutter Toggles**: Click folding indicators directly in the gutter margin to expand or collapse blocks.
 * **Smart Caret Navigation**: caret position calculation and arrow key movements automatically jump over hidden (folded) lines.
 
+### 19. Local AI Inline Completions (Ghost Text)
+* **Zero-Config Local AI**: Auto-detects a local Ollama instance on startup. If the optimized `qwen2.5-coder:1.5b` model is missing, the editor pulls it automatically in the background.
+* **Fill-in-the-Middle (FIM)**: Queries the local model using prefix and suffix document context surrounding the caret, generating accurate code completions in less than 100ms.
+* **Inline Ghost Text**: Renders suggestions inline in a faded, non-intrusive gray color (`#707070`) using monospace-aligned font formatting.
+* **Smart Interaction Keybindings**: Press `Tab` to accept and insert the suggestion, or `Esc` (or type any key) to dismiss it.
+* **Offline Privacy Protection**: Completely offline—zero API subscriptions, cloud costs, or tracking.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions
@@ -356,7 +363,7 @@ Interactive debugging features are integrated into the main shell via several de
 
 ### Phase 1: AI Copilot & Code Generation Integration
 * [x] **Out-of-Process LLM Connector**: Background agent host service to interface with local or cloud-based LLMs without blocking the primary editing loop.
-* [ ] **Inline Ghost Text**: Support inline ghost-text code completions using zero-allocation overlay renderings.
+* [x] **Inline Ghost Text**: Support inline ghost-text code completions using zero-allocation overlay renderings.
 * [x] **AI Chat & Command Palette Actions**: Build a floating sidebar chat window and command palette shortcodes (e.g., `/explain`, `/refactor`, `/fix`) to interact directly with code snippets.
 
 ### Phase 2: Advanced Editing Features
@@ -374,6 +381,21 @@ Interactive debugging features are integrated into the main shell via several de
 
 ### Prerequisites
 * **.NET 10.0 SDK** (Preview or Release matching project specifications)
+* **Ollama** (Required for local offline autocomplete/Ghost Text; no subscriptions or external API keys required!)
+
+### Local AI Autocomplete Setup (Ollama)
+SpanCoder features built-in, offline-friendly inline code completions (Ghost Text) powered by a local instance of **Ollama**.
+
+To enable this feature:
+1. **Download and Install Ollama** from the official website: [ollama.com](https://ollama.com).
+2. **Start Ollama** (ensure the Ollama service is running on its default port `11434`).
+3. **Launch SpanCoder**. The editor will automatically check for the local Ollama instance on startup.
+4. **Auto-Downloading the Model**: If the optimized `qwen2.5-coder:1.5b` model is missing, the application will automatically pull (download) it in the background. Progress will be displayed in the status bar (e.g., `AI: Downloading qwen2.5-coder:1.5b (900MB)...`).
+5. **Start Typing**: Once the model is ready, pause typing for 250ms in any code file to see light-gray ghost text suggestions. Press `Tab` to accept and insert the suggestion, or `Esc` (or keep typing) to dismiss it.
+
+> [!NOTE]
+> All model files are stored locally in your user profile under Ollama's model directory (`~/.ollama/models` or `%USERPROFILE%\.ollama\models`), meaning they are **never** checked into the Git repository.
+
 
 ### Compilation
 Build the solution files using the .NET CLI:

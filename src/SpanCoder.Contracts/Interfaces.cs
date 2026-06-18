@@ -10,6 +10,7 @@ namespace SpanCoder.Contracts
         ReadOnlySpan<char> GetLine(int lineIndex, out bool isContiguous, out char[]? rentedBuffer);
         long GetLineStart(int lineIndex);
         int Length { get; }
+        string GetTextRange(int offset, int length);
     }
 
     public interface IEngineConnection

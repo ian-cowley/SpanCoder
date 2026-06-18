@@ -186,7 +186,7 @@ namespace SpanCoder.Engine
             else if (provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase))
             {
                 // Ollama local endpoint
-                url = "http://localhost:11434/v1/chat/completions";
+                url = "http://127.0.0.1:11434/v1/chat/completions";
             }
             else
             {

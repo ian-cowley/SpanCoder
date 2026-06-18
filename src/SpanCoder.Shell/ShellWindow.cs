@@ -2792,6 +2792,7 @@ namespace SpanCoder.Shell
                 var response = await _httpClient.GetAsync("http://127.0.0.1:11434/api/tags");
                 if (!response.IsSuccessStatusCode)
                 {
+                    Console.WriteLine($"[ShellWindow] Ollama api/tags returned non-success: {response.StatusCode} - {response.ReasonPhrase}");
                     UpdateStatusBarText("AI Offline: Local Ollama returned error.");
                     return;
                 }
@@ -2818,11 +2819,13 @@ namespace SpanCoder.Shell
                 }
                 else
                 {
+                    Console.WriteLine($"[ShellWindow] Ollama api/pull returned non-success: {pullResponse.StatusCode} - {pullResponse.ReasonPhrase}");
                     UpdateStatusBarText("AI: Download failed. Run 'ollama pull qwen2.5-coder:1.5b' manually.");
                 }
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"[ShellWindow] Ollama check failed exception: {ex}");
                 LogHelper.Log($"[ShellWindow] Ollama check failed: {ex.Message}");
                 UpdateStatusBarText("AI Offline: Run 'ollama run qwen2.5-coder:1.5b'");
             }

@@ -3310,101 +3310,76 @@ namespace SpanCoder.Shell
                 {
                     // Ollama server is not running. Let's try to start it!
                     UpdateStatusBarText("AI: Starting local Ollama service...");
-                    try
+                    
+                    string? localExe = FindLocalOllamaExecutable();
+                    bool started = false;
+
+                    if (localExe != null)
                     {
-                        string exePath = "ollama";
-                        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                        string defaultOllamaPath = Path.Combine(localAppData, @"Programs\Ollama\ollama.exe");
-                        bool useShell = false;
-                        bool isWslOllama = false;
-
-                        if (!File.Exists(defaultOllamaPath) && OperatingSystem.IsWindows())
+                        try
                         {
-                            try
+                            var startInfo = new System.Diagnostics.ProcessStartInfo
                             {
-                                var wslCheckInfo = new System.Diagnostics.ProcessStartInfo
-                                {
-                                    FileName = "wsl",
-                                    Arguments = "which ollama",
-                                    RedirectStandardOutput = true,
-                                    CreateNoWindow = true,
-                                    UseShellExecute = false
-                                };
-                                using var checkProc = System.Diagnostics.Process.Start(wslCheckInfo);
-                                if (checkProc != null)
-                                {
-                                    string output = checkProc.StandardOutput.ReadToEnd();
-                                    checkProc.WaitForExit();
-                                    if (checkProc.ExitCode == 0 && output.Contains("ollama"))
-                                    {
-                                        isWslOllama = true;
-                                    }
-                                }
-                            }
-                            catch
-                            {
-                                // WSL not available
-                            }
+                                FileName = localExe,
+                                Arguments = "serve",
+                                CreateNoWindow = true,
+                                UseShellExecute = false
+                            };
+                            System.Diagnostics.Process.Start(startInfo);
+                            started = true;
+                            Console.WriteLine($"[ShellWindow] Launched local Ollama service: {localExe}");
                         }
-
-                        System.Diagnostics.ProcessStartInfo startInfo;
-                        if (isWslOllama)
+                        catch (Exception startEx)
                         {
-                            startInfo = new System.Diagnostics.ProcessStartInfo
+                            Console.WriteLine($"[ShellWindow] Failed to start local Ollama: {startEx.Message}");
+                        }
+                    }
+                    else if (OperatingSystem.IsWindows() && CheckWslOllama())
+                    {
+                        try
+                        {
+                            var startInfo = new System.Diagnostics.ProcessStartInfo
                             {
                                 FileName = "wsl",
                                 Arguments = "ollama serve",
                                 CreateNoWindow = true,
                                 UseShellExecute = false
                             };
-                            Console.WriteLine("[ShellWindow] Detected Ollama in WSL. Launching 'wsl ollama serve'...");
+                            System.Diagnostics.Process.Start(startInfo);
+                            started = true;
+                            Console.WriteLine("[ShellWindow] Detected Ollama in WSL. Launched 'wsl ollama serve'.");
                         }
-                        else
+                        catch (Exception wslEx)
                         {
-                            if (File.Exists(defaultOllamaPath))
-                            {
-                                exePath = defaultOllamaPath;
-                            }
-                            else
-                            {
-                                useShell = true;
-                            }
-
-                            startInfo = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = exePath,
-                                Arguments = "serve",
-                                CreateNoWindow = true,
-                                UseShellExecute = useShell
-                            };
+                            Console.WriteLine($"[ShellWindow] Failed to start WSL Ollama: {wslEx.Message}");
                         }
-
-                        System.Diagnostics.Process.Start(startInfo);
-                        
-                        // Wait a few seconds for the service to start
-                        await Task.Delay(3000);
-                        
-                        // Try querying tags again
-                        response = await client.GetAsync("http://127.0.0.1:11434/api/tags");
                     }
-                    catch (System.ComponentModel.Win32Exception winEx)
+                    else
                     {
-                        Console.WriteLine("[ShellWindow] Failed to launch 'ollama serve': Ollama executable not found. AI features will be offline.");
-                        LogHelper.Log($"[ShellWindow] Ollama not found: {winEx.Message}");
+                        Console.WriteLine("[ShellWindow] Ollama executable not found on host or WSL. AI features will be offline.");
                         UpdateStatusBarText("AI Offline: Ollama not found");
                         return;
                     }
-                    catch (Exception procEx)
+
+                    if (started)
                     {
-                        Console.WriteLine($"[ShellWindow] Failed to launch 'ollama serve': {procEx.Message}");
-                        throw; // rethrow to be caught by outer catch block
+                        // Wait a few seconds for the service to start
+                        await Task.Delay(3000);
+                        try
+                        {
+                            response = await client.GetAsync("http://127.0.0.1:11434/api/tags");
+                        }
+                        catch
+                        {
+                            // Ignore connection error after startup attempt
+                        }
                     }
                 }
 
                 if (response == null || !response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine($"[ShellWindow] Ollama api/tags returned non-success: {(response != null ? response.StatusCode.ToString() : "null")}");
-                    UpdateStatusBarText("AI Offline: Local Ollama returned error.");
+                    Console.WriteLine("[ShellWindow] Ollama service not running.");
+                    UpdateStatusBarText("AI Offline: Ollama not running");
                     return;
                 }
 
@@ -3439,10 +3414,111 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ShellWindow] Ollama check failed exception: {ex}");
+                Console.WriteLine($"[ShellWindow] Ollama check failed: {ex.Message}");
                 LogHelper.Log($"[ShellWindow] Ollama check failed: {ex.Message}");
-                UpdateStatusBarText("AI Offline: Run 'ollama run qwen2.5-coder:1.5b'");
+                UpdateStatusBarText("AI Offline: Ollama not running");
             }
+        }
+
+        private static string? FindLocalOllamaExecutable()
+        {
+            try
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    string defaultPath = Path.Combine(localAppData, @"Programs\Ollama\ollama.exe");
+                    if (File.Exists(defaultPath))
+                    {
+                        return defaultPath;
+                    }
+                    return FindInPath("ollama.exe") ?? FindInPath("ollama");
+                }
+                else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                {
+                    string[] defaultPaths = { "/usr/local/bin/ollama", "/usr/bin/ollama", "/usr/sbin/ollama" };
+                    foreach (var path in defaultPaths)
+                    {
+                        if (File.Exists(path))
+                        {
+                            return path;
+                        }
+                    }
+                    if (OperatingSystem.IsMacOS())
+                    {
+                        string macAppPath = "/Applications/Ollama.app/Contents/Resources/ollama";
+                        if (File.Exists(macAppPath))
+                        {
+                            return macAppPath;
+                        }
+                    }
+                    return FindInPath("ollama");
+                }
+            }
+            catch
+            {
+                // Ignore path errors
+            }
+            return null;
+        }
+
+        private static string? FindInPath(string exeName)
+        {
+            string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+            if (string.IsNullOrEmpty(pathEnv))
+            {
+                return null;
+            }
+
+            char pathSeparator = OperatingSystem.IsWindows() ? ';' : ':';
+            string[] paths = pathEnv.Split(pathSeparator, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var path in paths)
+            {
+                try
+                {
+                    string fullPath = Path.Combine(path.Trim(), exeName);
+                    if (File.Exists(fullPath))
+                    {
+                        return fullPath;
+                    }
+                }
+                catch
+                {
+                    // Ignore path errors
+                }
+            }
+            return null;
+        }
+
+        private static bool CheckWslOllama()
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+            try
+            {
+                var wslCheckInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "wsl",
+                    Arguments = "which ollama",
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                };
+                using var checkProc = System.Diagnostics.Process.Start(wslCheckInfo);
+                if (checkProc != null)
+                {
+                    string output = checkProc.StandardOutput.ReadToEnd();
+                    checkProc.WaitForExit();
+                    return checkProc.ExitCode == 0 && output.Contains("ollama");
+                }
+            }
+            catch
+            {
+                // WSL not available
+            }
+            return false;
         }
 
         private void UpdateStatusBarText(string text)

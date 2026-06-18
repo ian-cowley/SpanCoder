@@ -22,7 +22,7 @@ namespace SpanCoder.Shell
 {
     public class ShellWindow : Window
     {
-        private EditorPane _activePane = null!;
+        internal EditorPane _activePane = null!;
         private readonly List<EditorPane> _editorPanes = new();
         private readonly List<TextEditorCanvas.ContextMenuItem> _extensionContextMenuItems = new();
         private Grid _editorSplitContainer = null!;
@@ -43,7 +43,7 @@ namespace SpanCoder.Shell
         private TextBlock _statusBar = null!;
         private StackPanel _statusBarExtensionPanel = null!;
         
-        private Border _debugToolbar = null!;
+        internal Border _debugToolbar = null!;
         private ListBox _debugVariablesList = null!;
         private ListBox _debugCallStackList = null!;
         private ListBox _debugBreakpointsList = null!;
@@ -63,14 +63,21 @@ namespace SpanCoder.Shell
         private System.Diagnostics.Stopwatch? _startupStopwatch;
 
         private IExtensionManager? _extensionManager;
-        private TabControl _sidebarTabControl = null!;
+        internal TabControl _sidebarTabControl = null!;
         private AiChatPanel _aiChatPanel = null!;
         private FindReplaceFilesWindow? _findReplaceFilesWindow;
-        private TabControl _bottomTabControl = null!;
+        internal TabControl _bottomTabControl = null!;
         private TabItem _findResultsTab = null!;
         private FindResultsPanel _findResultsPanel = null!;
-        private Menu _mainMenu = null!;
+        internal Menu _mainMenu = null!;
         private StackPanel _toolbarPanel = null!;
+        internal Border _toolbarBorder = null!;
+        internal ColumnDefinition _sidebarCol = null!;
+        internal GridSplitter _sidebarSplitter = null!;
+        internal GridSplitter _bottomSplitter = null!;
+        internal Grid _editorPaneGrid = null!;
+        internal Grid _statusBarGrid = null!;
+        internal bool _zenMode = false;
         private readonly Dictionary<string, TextBlock> _pluginPanels = new();
         private readonly Dictionary<string, string> _commandToExtensionMap = new();
         private readonly List<CommandDescriptor> _extensionCommands = new();
@@ -79,10 +86,10 @@ namespace SpanCoder.Shell
         
         private SidebarFileTree _fileTree = null!;
 
-        private Border _autocompleteBorder = null!;
+        internal Border _autocompleteBorder = null!;
         private ListBox _autocompleteList = null!;
         private List<AutocompleteItem> _autocompleteItems = new();
-        private Border _hoverBorder = null!;
+        internal Border _hoverBorder = null!;
         private TextBlock _hoverText = null!;
         private double _lastHoverMouseX;
         private double _lastHoverMouseY;
@@ -165,7 +172,7 @@ namespace SpanCoder.Shell
                 Margin = new Thickness(0)
             };
 
-            var toolbarBorder = new Border
+            _toolbarBorder = new Border
             {
                 BorderBrush = new SolidColorBrush(Color.Parse("#2D2D2D")),
                 BorderThickness = new Thickness(0, 0, 0, 1),
@@ -174,8 +181,8 @@ namespace SpanCoder.Shell
                 Child = _toolbarPanel
             };
 
-            mainGrid.Children.Add(toolbarBorder);
-            Grid.SetRow(toolbarBorder, 1);
+            mainGrid.Children.Add(_toolbarBorder);
+            Grid.SetRow(_toolbarBorder, 1);
 
             // Add default toolbar items
             AddToolbarButton("Toggle Line Comment", "Edit.ToggleLineComment", "Toggle Line Comment (Ctrl+/)");
@@ -184,8 +191,8 @@ namespace SpanCoder.Shell
 
             // 2. Workspace Layout
             var workspaceGrid = new Grid();
-            var sidebarCol = new ColumnDefinition { Width = new GridLength(220), MinWidth = 150 };
-            workspaceGrid.ColumnDefinitions.Add(sidebarCol); // Sidebar
+            _sidebarCol = new ColumnDefinition { Width = new GridLength(220), MinWidth = 150 };
+            workspaceGrid.ColumnDefinitions.Add(_sidebarCol); // Sidebar
             workspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Splitter
             workspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Editor Pane
 
@@ -895,23 +902,23 @@ namespace SpanCoder.Shell
             Grid.SetColumn(_sidebarTabControl, 0);
 
             // 2.2. Grid Splitter
-            var splitter = new GridSplitter
+            _sidebarSplitter = new GridSplitter
             {
                 Width = 4,
                 Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
                 ResizeDirection = GridResizeDirection.Columns
             };
-            workspaceGrid.Children.Add(splitter);
-            Grid.SetColumn(splitter, 1);
+            workspaceGrid.Children.Add(_sidebarSplitter);
+            Grid.SetColumn(_sidebarSplitter, 1);
 
             // 2.3. Editor Pane (Tabs + Editor Canvas Container)
-            var editorPane = new Grid();
-            editorPane.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Row 0: Editor Split Container
-            editorPane.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Row 1: Bottom Splitter
-            editorPane.RowDefinitions.Add(new RowDefinition { Height = new GridLength(180, GridUnitType.Pixel) }); // Row 2: Bottom Panel
+            _editorPaneGrid = new Grid();
+            _editorPaneGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Row 0: Editor Split Container
+            _editorPaneGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Row 1: Bottom Splitter
+            _editorPaneGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(180, GridUnitType.Pixel) }); // Row 2: Bottom Panel
 
             _editorSplitContainer = new Grid();
-            editorPane.Children.Add(_editorSplitContainer);
+            _editorPaneGrid.Children.Add(_editorSplitContainer);
             Grid.SetRow(_editorSplitContainer, 0);
 
             // Initial Editor Pane
@@ -1026,15 +1033,15 @@ namespace SpanCoder.Shell
             Grid.SetColumn(_debugToolbar, 0);
 
             // Row 1: Bottom Splitter
-            var bottomSplitter = new GridSplitter
+            _bottomSplitter = new GridSplitter
             {
                 Height = 4,
                 Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
                 ResizeDirection = GridResizeDirection.Rows,
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
-            editorPane.Children.Add(bottomSplitter);
-            Grid.SetRow(bottomSplitter, 1);
+            _editorPaneGrid.Children.Add(_bottomSplitter);
+            Grid.SetRow(_bottomSplitter, 1);
 
             // Row 3: Bottom Panel TabControl
             _bottomTabControl = new TabControl
@@ -1095,7 +1102,7 @@ namespace SpanCoder.Shell
             _findResultsTab = new TabItem { Header = findResultsTabHeader, Content = _findResultsPanel };
             _bottomTabControl.Items.Add(_findResultsTab);
 
-            editorPane.Children.Add(_bottomTabControl);
+            _editorPaneGrid.Children.Add(_bottomTabControl);
             Grid.SetRow(_bottomTabControl, 2);
 
             // Start the PTY process
@@ -1110,20 +1117,20 @@ namespace SpanCoder.Shell
                 terminalControl.BindPty(_terminalPty);
             }
 
-            workspaceGrid.Children.Add(editorPane);
-            Grid.SetColumn(editorPane, 2);
+            workspaceGrid.Children.Add(_editorPaneGrid);
+            Grid.SetColumn(_editorPaneGrid, 2);
 
             mainGrid.Children.Add(workspaceGrid);
             Grid.SetRow(workspaceGrid, 2);
 
             // 3. Status Bar Container
-            var statusBarGrid = new Grid
+            _statusBarGrid = new Grid
             {
                 Background = new SolidColorBrush(Color.Parse("#1A1A1A")),
                 Height = 22
             };
-            statusBarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Left status text
-            statusBarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Right extension controls
+            _statusBarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Left status text
+            _statusBarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Right extension controls
 
             _statusBar = new TextBlock
             {
@@ -1132,7 +1139,7 @@ namespace SpanCoder.Shell
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize = 12
             };
-            statusBarGrid.Children.Add(_statusBar);
+            _statusBarGrid.Children.Add(_statusBar);
             Grid.SetColumn(_statusBar, 0);
 
             _statusBarExtensionPanel = new StackPanel
@@ -1142,11 +1149,11 @@ namespace SpanCoder.Shell
                 Margin = new Thickness(0, 0, 8, 0),
                 VerticalAlignment = VerticalAlignment.Center
             };
-            statusBarGrid.Children.Add(_statusBarExtensionPanel);
+            _statusBarGrid.Children.Add(_statusBarExtensionPanel);
             Grid.SetColumn(_statusBarExtensionPanel, 1);
 
-            mainGrid.Children.Add(statusBarGrid);
-            Grid.SetRow(statusBarGrid, 3);
+            mainGrid.Children.Add(_statusBarGrid);
+            Grid.SetRow(_statusBarGrid, 3);
 
             // 4. Command Palette Overlay
             _commandPalette = new CommandPalette(this);
@@ -1171,6 +1178,28 @@ namespace SpanCoder.Shell
             else if (System.IO.Directory.Exists(defaultWorkspace))
             {
                 _fileTree.SetRootPath(defaultWorkspace);
+            }
+
+            // Register key bindings for all core commands so they work even if menu bar is hidden
+            foreach (var cmd in GeneratedCommandRegistry.Commands)
+            {
+                if (!string.IsNullOrEmpty(cmd.DefaultShortcut))
+                {
+                    try
+                    {
+                        var gesture = KeyGesture.Parse(cmd.DefaultShortcut);
+                        var binding = new KeyBinding
+                        {
+                            Gesture = gesture,
+                            Command = new ActionCommand(() => OnCommandInvoked(cmd.Id))
+                        };
+                        this.KeyBindings.Add(binding);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ShellWindow] Failed to parse shortcut '{cmd.DefaultShortcut}' for command '{cmd.Id}': {ex.Message}");
+                    }
+                }
             }
 
             UpdateStatusBar();
@@ -1701,25 +1730,16 @@ namespace SpanCoder.Shell
                                     // New document loaded! Add it to the active pane.
                                     var newOpenDoc = new OpenDocument(docId, doc.FilePath, doc);
                                     _activePane.OpenDocuments.Add(newOpenDoc);
-                                    _activePane.ActiveDocument = newOpenDoc;
-                                    _activePane.Canvas.Document = doc;
+                                    
+                                    SwitchToDocument(newOpenDoc);
 
                                     if (_pendingNavigation.HasValue && _pendingNavigation.Value.FilePath.Equals(doc.FilePath, StringComparison.OrdinalIgnoreCase))
                                     {
                                         _activePane.Canvas.MoveCaret(_pendingNavigation.Value.Line, _pendingNavigation.Value.Character);
                                         _pendingNavigation = null;
                                     }
-                                    else
-                                    {
-                                        _activePane.Canvas.MoveCaret(0, 0);
-                                    }
-                                    _activePane.Canvas.ScrollX = 0;
-                                    _activePane.Canvas.ScrollY = 0;
                                     
-                                    RebuildTabsUI(_activePane);
-                                    _activePane.UpdateScrollbars();
                                     RequestLspFoldingRanges(docId);
-                                    TriggerHtmlPreviewUpdate();
                                 }
                                 else
                                 {
@@ -2420,7 +2440,11 @@ namespace SpanCoder.Shell
 
         private void SwitchToDocument(OpenDocument openDoc)
         {
-            if (_activeDocument == openDoc) return;
+            if (_activeDocument == openDoc)
+            {
+                _activePane.UpdateDocumentView();
+                return;
+            }
 
             if (_activeDocument != null)
             {
@@ -2696,24 +2720,167 @@ namespace SpanCoder.Shell
         }
 
         [Command("View.SplitEditorHorizontal", "Split Editor Horizontally", "View", "Ctrl+E, H")]
-        [MenuItem("View.SplitEditorHorizontal", "View/Split Editor Horizontally", 30)]
+        [MenuItem("View.SplitEditorHorizontal", "View/Editor Layout/Split Horizontally", 30)]
         public static void SplitEditorHorizontalCommand(ShellWindow window)
         {
             window.SplitActivePane(true);
         }
 
         [Command("View.SplitEditorVertical", "Split Editor Vertically", "View", "Ctrl+E, V")]
-        [MenuItem("View.SplitEditorVertical", "View/Split Editor Vertically", 31)]
+        [MenuItem("View.SplitEditorVertical", "View/Editor Layout/Split Vertically", 31)]
         public static void SplitEditorVerticalCommand(ShellWindow window)
         {
             window.SplitActivePane(false);
         }
 
         [Command("View.UnsplitEditor", "Remove Split Editor", "View", "Ctrl+E, U")]
-        [MenuItem("View.UnsplitEditor", "View/Remove Split Editor", 32)]
+        [MenuItem("View.UnsplitEditor", "View/Editor Layout/Remove Split", 32)]
         public static void UnsplitEditorCommand(ShellWindow window)
         {
             window.UnsplitActivePane();
+        }
+
+        public void ToggleMenu()
+        {
+            _mainMenu.IsVisible = !_mainMenu.IsVisible;
+        }
+
+        public void ToggleToolbar()
+        {
+            _toolbarBorder.IsVisible = !_toolbarBorder.IsVisible;
+        }
+
+        private double _lastSidebarWidth = 220;
+        public void ToggleSidebar()
+        {
+            bool isCurrentlyVisible = _sidebarCol.Width.Value > 0;
+            if (isCurrentlyVisible)
+            {
+                _lastSidebarWidth = _sidebarCol.Width.Value;
+                _sidebarCol.MinWidth = 0;
+                _sidebarCol.Width = new GridLength(0);
+                _sidebarSplitter.IsVisible = false;
+                _sidebarTabControl.IsVisible = false;
+            }
+            else
+            {
+                _sidebarCol.MinWidth = 150;
+                _sidebarCol.Width = new GridLength(_lastSidebarWidth > 0 ? _lastSidebarWidth : 220);
+                _sidebarSplitter.IsVisible = true;
+                _sidebarTabControl.IsVisible = true;
+            }
+        }
+
+        private double _lastBottomPanelHeight = 180;
+        public void ToggleBottomPanel()
+        {
+            var bottomRow = _editorPaneGrid.RowDefinitions[2];
+            bool isCurrentlyVisible = bottomRow.Height.Value > 0;
+            if (isCurrentlyVisible)
+            {
+                _lastBottomPanelHeight = bottomRow.Height.Value;
+                bottomRow.Height = new GridLength(0);
+                _bottomSplitter.IsVisible = false;
+                _bottomTabControl.IsVisible = false;
+            }
+            else
+            {
+                bottomRow.Height = new GridLength(_lastBottomPanelHeight > 0 ? _lastBottomPanelHeight : 180);
+                _bottomSplitter.IsVisible = true;
+                _bottomTabControl.IsVisible = true;
+            }
+        }
+
+        public void ToggleStatusBar()
+        {
+            _statusBarGrid.IsVisible = !_statusBarGrid.IsVisible;
+        }
+
+        [Command("View.ToggleMenu", "Toggle Menu Bar", "View", "Ctrl+Alt+M")]
+        [MenuItem("View.ToggleMenu", "View/Appearance/Toggle Menu Bar", 40)]
+        public static void ToggleMenuCommand(ShellWindow window)
+        {
+            window.ToggleMenu();
+        }
+
+        [Command("View.ToggleToolbar", "Toggle Toolbar", "View", "Ctrl+Alt+T")]
+        [MenuItem("View.ToggleToolbar", "View/Appearance/Toggle Toolbar", 41)]
+        public static void ToggleToolbarCommand(ShellWindow window)
+        {
+            window.ToggleToolbar();
+        }
+
+        [Command("View.ToggleSidebar", "Toggle Sidebar", "View", "Ctrl+B")]
+        [MenuItem("View.ToggleSidebar", "View/Appearance/Toggle Sidebar", 42)]
+        public static void ToggleSidebarCommand(ShellWindow window)
+        {
+            window.ToggleSidebar();
+        }
+
+        [Command("View.ToggleBottomPanel", "Toggle Bottom Panel", "View", "Ctrl+J")]
+        [MenuItem("View.ToggleBottomPanel", "View/Appearance/Toggle Bottom Panel", 43)]
+        public static void ToggleBottomPanelCommand(ShellWindow window)
+        {
+            window.ToggleBottomPanel();
+        }
+
+        [Command("View.ToggleStatusBar", "Toggle Status Bar", "View", "Ctrl+Alt+S")]
+        [MenuItem("View.ToggleStatusBar", "View/Appearance/Toggle Status Bar", 44)]
+        public static void ToggleStatusBarCommand(ShellWindow window)
+        {
+            window.ToggleStatusBar();
+        }
+
+        [Command("View.ToggleZenMode", "Toggle Zen Mode", "View", "Ctrl+K, Z")]
+        [MenuItem("View.ToggleZenMode", "View/Appearance/Toggle Zen Mode", 50)]
+        public static void ToggleZenModeCommand(ShellWindow window)
+        {
+            window.ToggleZenMode();
+        }
+
+        public void ToggleZenMode()
+        {
+            _zenMode = !_zenMode;
+            bool showGutter = !_zenMode;
+
+            foreach (var pane in _editorPanes)
+            {
+                pane.Canvas.IsGutterVisible = showGutter;
+            }
+
+            if (_zenMode)
+            {
+                _mainMenu.IsVisible = false;
+                _toolbarBorder.IsVisible = false;
+                _statusBarGrid.IsVisible = false;
+
+                _sidebarCol.MinWidth = 0;
+                _sidebarCol.Width = new GridLength(0);
+                _sidebarSplitter.IsVisible = false;
+                _sidebarTabControl.IsVisible = false;
+
+                var bottomRow = _editorPaneGrid.RowDefinitions[2];
+                bottomRow.Height = new GridLength(0);
+                _bottomSplitter.IsVisible = false;
+                _bottomTabControl.IsVisible = false;
+            }
+            else
+            {
+                _mainMenu.IsVisible = true;
+                _toolbarBorder.IsVisible = true;
+                _statusBarGrid.IsVisible = true;
+
+                _sidebarCol.MinWidth = 150;
+                _sidebarCol.Width = new GridLength(_lastSidebarWidth > 0 ? _lastSidebarWidth : 220);
+                _sidebarSplitter.IsVisible = true;
+                _sidebarTabControl.IsVisible = true;
+
+                var bottomRow = _editorPaneGrid.RowDefinitions[2];
+                bottomRow.Height = new GridLength(_lastBottomPanelHeight > 0 ? _lastBottomPanelHeight : 180);
+                _bottomSplitter.IsVisible = true;
+                _bottomTabControl.IsVisible = true;
+            }
+            UpdateScrollbars();
         }
 
         public void SetActivePane(EditorPane pane)
@@ -3282,28 +3449,28 @@ namespace SpanCoder.Shell
         }
 
         [Command("Edit.Find", "Quick Find", "Edit", "Ctrl+F")]
-        [MenuItem("Edit.Find", "Edit/Quick Find", 60)]
+        [MenuItem("Edit.Find", "Edit/Find and Replace/Quick Find", 60)]
         public static void FindCommand(ShellWindow window)
         {
             window._activePane.ShowFindReplace(showReplace: false);
         }
 
         [Command("Edit.Replace", "Quick Replace", "Edit", "Ctrl+H")]
-        [MenuItem("Edit.Replace", "Edit/Quick Replace", 70)]
+        [MenuItem("Edit.Replace", "Edit/Find and Replace/Quick Replace", 70)]
         public static void ReplaceCommand(ShellWindow window)
         {
             window._activePane.ShowFindReplace(showReplace: true);
         }
 
         [Command("Edit.FindInFiles", "Find in Files", "Edit", "Ctrl+Shift+F")]
-        [MenuItem("Edit.FindInFiles", "Edit/Find in Files", 71)]
+        [MenuItem("Edit.FindInFiles", "Edit/Find and Replace/Find in Files", 71)]
         public static void FindInFilesCommand(ShellWindow window)
         {
             window.ShowFindReplaceFilesWindow(showReplace: false);
         }
 
         [Command("Edit.ReplaceInFiles", "Replace in Files", "Edit", "Ctrl+Shift+H")]
-        [MenuItem("Edit.ReplaceInFiles", "Edit/Replace in Files", 72)]
+        [MenuItem("Edit.ReplaceInFiles", "Edit/Find and Replace/Replace in Files", 72)]
         public static void ReplaceInFilesCommand(ShellWindow window)
         {
             window.ShowFindReplaceFilesWindow(showReplace: true);
@@ -3530,14 +3697,14 @@ namespace SpanCoder.Shell
         }
 
         [Command("Edit.ToggleLineComment", "Toggle Line Comment", "Edit", "Ctrl+/")]
-        [MenuItem("Edit.ToggleLineComment", "Edit/Toggle Line Comment", 40)]
+        [MenuItem("Edit.ToggleLineComment", "Edit/Comments/Toggle Line Comment", 40)]
         public static void ToggleLineCommentCommand(ShellWindow window)
         {
             window.ExecuteToggleLineComment();
         }
 
         [Command("Edit.ToggleBlockComment", "Toggle Block Comment", "Edit", "Ctrl+Shift+/")]
-        [MenuItem("Edit.ToggleBlockComment", "Edit/Toggle Block Comment", 50)]
+        [MenuItem("Edit.ToggleBlockComment", "Edit/Comments/Toggle Block Comment", 50)]
         public static void ToggleBlockCommentCommand(ShellWindow window)
         {
             window.ExecuteToggleBlockComment();
@@ -3644,7 +3811,8 @@ namespace SpanCoder.Shell
         {
             _ghostTextTimer?.Stop();
             // Only trigger completion if there is an active document, no selection, and no multiple carets
-            if (_activeDocument != null && _canvas.ExtraCarets.Count == 0 && _canvas.GhostText == null)
+            // Avoid triggering completion on the first line (using directives / headers)
+            if (_activeDocument != null && _canvas.ExtraCarets.Count == 0 && _canvas.GhostText == null && _canvas.CaretLine > 0)
             {
                 _ghostTextTimer?.Start();
             }
@@ -3653,7 +3821,7 @@ namespace SpanCoder.Shell
         private void OnGhostTextTimerTick(object? sender, EventArgs e)
         {
             _ghostTextTimer?.Stop();
-            if (_activeDocument == null || _canvas.Document == null || _canvas.ExtraCarets.Count > 0) return;
+            if (_activeDocument == null || _canvas.Document == null || _canvas.ExtraCarets.Count > 0 || _canvas.CaretLine == 0) return;
 
             var doc = _canvas.Document;
             int caretOffset = _canvas.GetCaretAbsoluteOffset();

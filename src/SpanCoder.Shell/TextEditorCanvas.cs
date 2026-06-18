@@ -87,9 +87,23 @@ namespace SpanCoder.Shell
             }
         }
 
+        private bool _isGutterVisible = true;
+        public bool IsGutterVisible
+        {
+            get => _isGutterVisible;
+            set
+            {
+                if (_isGutterVisible != value)
+                {
+                    _isGutterVisible = value;
+                    InvalidateVisual();
+                }
+            }
+        }
+
         public double GetGutterWidth()
         {
-            if (Document == null) return 0;
+            if (!_isGutterVisible || Document == null) return 0;
             int lineCount = Document.GetLineCount();
             int digits = Math.Max(2, (int)Math.Log10(Math.Max(1, lineCount)) + 1);
             return digits * CharWidth + 25.0;

@@ -396,7 +396,7 @@ Interactive debugging features are integrated into the main shell via several de
 * [x] **GitLens-style Inline Blame**: Add real-time inline git blame annotations (rendered as faded ghost-text next to the active cursor line) built directly into the core editor canvas.
 * [x] **Prettier Formatter Extension** (`SpanCoder.Extensions.Prettier`): Support out-of-process formatting and asynchronous Format-on-Save by routing code buffers over secure TCP connections.
 * [x] **ErrorLens Inline Diagnostics**: Render full LSP compiler diagnostics descriptions directly at the end of the problematic line using Skia text overlays, built directly into the core editor canvas.
-* [ ] **Focus Mode & Zen Workspace Layout**: Toggled workspace layout (`Ctrl+K, Z`) that collapses the side panels, status bar, and gutters for a distraction-free, code-first canvas.
+* [x] **Focus Mode & Zen Workspace Layout**: Toggled workspace layout (`Ctrl+K, Z`) that collapses the side panels, status bar, and gutters for a distraction-free, code-first canvas.
 * [ ] **Visual Git Diff & Native PR Code Reviews**: Side-by-side split Diff pane to review git modifications and pull requests directly inside the editor without context switching.
 * [ ] **Interactive Keyboard Shortcuts & Searchable Settings**: Real-time filtered settings search bar and interactive remapper UI to simplify setting updates for developers.
 

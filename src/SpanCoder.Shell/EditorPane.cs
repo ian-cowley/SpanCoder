@@ -89,6 +89,7 @@ namespace SpanCoder.Shell
             EditorGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Scrollbar H
 
             Canvas = new TextEditorCanvas();
+            Canvas.IsGutterVisible = !_window._zenMode;
             Canvas.LayoutChanged += UpdateScrollbars;
             EditorGrid.Children.Add(Canvas);
             Grid.SetRow(Canvas, 0);
@@ -254,11 +255,19 @@ namespace SpanCoder.Shell
                 VScroll.IsVisible = false;
                 HScroll.IsVisible = false;
 
-                // Remove existing Extension view if any
-                var existing = EditorGrid.Children.Cast<Control>().FirstOrDefault(c => c != Canvas && c != VScroll && c != HScroll && !(c is FindReplaceOverlay));
-                if (existing != null)
+                // Remove existing Extension views if any
+                var extensionControls = EditorGrid.Children.Cast<Control>().Where(c => 
+                    c != Canvas && 
+                    c != VScroll && 
+                    c != HScroll && 
+                    !(c is FindReplaceOverlay) && 
+                    c != _window._autocompleteBorder && 
+                    c != _window._hoverBorder && 
+                    c != _window._debugToolbar).ToList();
+
+                foreach (var ctrl in extensionControls)
                 {
-                    EditorGrid.Children.Remove(existing);
+                    EditorGrid.Children.Remove(ctrl);
                 }
 
                 // Create and add the new extension details view control!
@@ -279,10 +288,19 @@ namespace SpanCoder.Shell
                 VScroll.IsVisible = true;
                 HScroll.IsVisible = true;
 
-                var existing = EditorGrid.Children.Cast<Control>().FirstOrDefault(c => c != Canvas && c != VScroll && c != HScroll && !(c is FindReplaceOverlay));
-                if (existing != null)
+                // Remove existing Extension views if any
+                var extensionControls = EditorGrid.Children.Cast<Control>().Where(c => 
+                    c != Canvas && 
+                    c != VScroll && 
+                    c != HScroll && 
+                    !(c is FindReplaceOverlay) && 
+                    c != _window._autocompleteBorder && 
+                    c != _window._hoverBorder && 
+                    c != _window._debugToolbar).ToList();
+
+                foreach (var ctrl in extensionControls)
                 {
-                    EditorGrid.Children.Remove(existing);
+                    EditorGrid.Children.Remove(ctrl);
                 }
             }
         }

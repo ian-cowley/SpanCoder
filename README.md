@@ -377,6 +377,14 @@ Interactive debugging features are integrated into the main shell via several de
 * [x] **Remote Engine Host**: Allow `SpanCoder.App` to run locally while connecting to a remote `SpanCoder.Engine` daemon running on a Linux server or in a Docker DevContainer.
 * [x] **Real-Time Collaborative Coding**: Synchronize piece-table buffers between multiple developers using low-latency CRDT (Conflict-free Replicated Data Types) protocols over WebSockets.
 
+### Phase 4: Ecosystem & High-Value Extensions
+* [ ] **SpanCoder.Extensions.GitLens**: Add inline git blame annotations (rendered as faded ghost-text at the end of active lines), branching commit history graph, and interactive visual diff panels.
+* [ ] **SpanCoder.Extensions.Prettier**: Support format-on-save asynchronously by pipe-routing code buffers to external linters/formatters (`prettier`, `black`, `dotnet-format`) in background processes.
+* [ ] **SpanCoder.Extensions.ErrorLens**: Render full LSP compiler diagnostics descriptions directly at the end of the problematic line using Skia text overlays.
+* [ ] **Focus Mode & Zen Workspace Layout**: Toggled workspace layout (`Ctrl+K, Z`) that collapses the side panels, status bar, and gutters for a distraction-free, code-first canvas.
+* [ ] **Visual Git Diff & Native PR Code Reviews**: Side-by-side split Diff pane to review git modifications and pull requests directly inside the editor without context switching.
+* [ ] **Interactive Keyboard Shortcuts & Searchable Settings**: Real-time filtered settings search bar and interactive remapper UI to simplify setting updates for developers.
+
 ---
 
 ## Build, Run, and Test Instructions

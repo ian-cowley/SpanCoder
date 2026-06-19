@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.LogicalTree;
@@ -333,6 +334,79 @@ namespace SpanCoder.Tests
             Assert.NotNull(window.BtnGitPull.Cursor);
             Assert.NotNull(window.BtnGitStageAll.Cursor);
             Assert.NotNull(window.BtnGitUnstageAll.Cursor);
+        }
+
+        [AvaloniaFact]
+        public void TestEditorSplitDraggableControl()
+        {
+            var window = new ShellWindow();
+            window.InitializeLayout();
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            // 1. Get the current active EditorPane
+            var pane = window._activePane;
+            Assert.NotNull(pane);
+
+            // 2. Verify SplitHandle exists with correct properties
+            Assert.NotNull(pane.SplitHandle);
+            Assert.Equal(8, pane.SplitHandle.Height);
+            Assert.NotNull(pane.SplitHandle.Cursor);
+
+            // 3. Verify horizontal split button is removed from tabs action panel
+            var actionPanelButtons = pane.GetLogicalDescendants().OfType<Button>().ToList();
+            Assert.DoesNotContain(actionPanelButtons, b => b.Content as string == "—");
+
+            // 4. Verify splitting logic via pointer drag simulation
+            var panesBefore = window.GetLogicalDescendants().OfType<EditorPane>().ToList();
+            Assert.Single(panesBefore);
+
+            // Simulate pointer pressed
+            var pressedArgs = new PointerPressedEventArgs(
+                pane.SplitHandle,
+                new Pointer(0, PointerType.Mouse, true),
+                pane.SplitHandle,
+                new Point(0, 0),
+                0,
+                new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed),
+                KeyModifiers.None
+            );
+            pane.SplitHandle.RaiseEvent(pressedArgs);
+
+            // Simulate pointer moved down by 40 pixels (threshold is 30)
+            var movedArgs = new PointerEventArgs(
+                InputElement.PointerMovedEvent,
+                pane.SplitHandle,
+                new Pointer(0, PointerType.Mouse, true),
+                pane,
+                new Point(0, 40),
+                0,
+                new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.Other),
+                KeyModifiers.None
+            );
+            pane.SplitHandle.RaiseEvent(movedArgs);
+
+            // Simulate pointer released to trigger the split
+            var releasedArgs = new PointerReleasedEventArgs(
+                pane.SplitHandle,
+                new Pointer(0, PointerType.Mouse, true),
+                pane,
+                new Point(0, 40),
+                0,
+                new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonReleased),
+                KeyModifiers.None,
+                MouseButton.Left
+            );
+            pane.SplitHandle.RaiseEvent(releasedArgs);
+
+            // Run UI jobs to process the split layout changes
+            Dispatcher.UIThread.RunJobs();
+
+            var panesAfter = window.GetLogicalDescendants().OfType<EditorPane>().ToList();
+            Assert.Equal(2, panesAfter.Count);
+
+            // Clean up window
+            window.Close();
         }
     }
 }

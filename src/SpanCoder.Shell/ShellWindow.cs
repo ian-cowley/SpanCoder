@@ -40,6 +40,7 @@ namespace SpanCoder.Shell
         }
 
         public TextEditorCanvas ActiveCanvas => _canvas;
+        internal int EditorPanesCount => _editorPanes.Count;
         internal CommandPalette CommandPalette => _commandPalette;
         internal Border GitBranchStatusBlock => _gitBranchStatusBlock;
         internal Button? BtnGitPull;
@@ -731,6 +732,13 @@ namespace SpanCoder.Shell
                           ""category"": ""Format""
                         }
                       ],
+                      ""toolbarItems"": [
+                        {
+                          ""commandId"": ""prettier.format"",
+                          ""displayName"": ""Format"",
+                          ""orderPriority"": 220
+                        }
+                      ],
                       ""settings"": [
                         {
                           ""id"": ""prettier-extension.prettierPath"",
@@ -934,6 +942,15 @@ namespace SpanCoder.Shell
                     }"
                 }
             };
+            // Dynamically set IsInstalled on startup based on folder presence
+            foreach (var item in _marketplaceExtensions)
+            {
+                var pluginsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins", item.Id);
+                if (System.IO.Directory.Exists(pluginsDir))
+                {
+                    item.IsInstalled = true;
+                }
+            }
 
             void RefreshExtensionsList()
             {
@@ -3297,6 +3314,11 @@ namespace SpanCoder.Shell
 
         public void SplitActivePane(bool horizontal)
         {
+            SplitActivePane(horizontal, 0.5);
+        }
+
+        public void SplitActivePane(bool horizontal, double ratio)
+        {
             if (_editorPanes.Count >= 2)
             {
                 _statusBar.Text = "Maximum 2 editor panes supported.";
@@ -3325,8 +3347,14 @@ namespace SpanCoder.Shell
             }
 
             _editorPanes.Add(newPane);
-            RebuildSplitLayout(horizontal);
+            RebuildSplitLayout(horizontal, ratio);
             SetActivePane(newPane);
+
+            // Update split handles visibility on all panes
+            foreach (var pane in _editorPanes)
+            {
+                pane.UpdateSplitHandlesVisibility();
+            }
         }
 
         public void UnsplitPane(EditorPane paneToRemove)
@@ -3351,6 +3379,9 @@ namespace SpanCoder.Shell
             Grid.SetColumn(remainingPane, 0);
 
             SetActivePane(remainingPane);
+
+            // Update split handles visibility on the remaining pane
+            remainingPane.UpdateSplitHandlesVisibility();
         }
 
         public void UnsplitActivePane()
@@ -3359,6 +3390,11 @@ namespace SpanCoder.Shell
         }
 
         private void RebuildSplitLayout(bool horizontal)
+        {
+            RebuildSplitLayout(horizontal, 0.5);
+        }
+
+        private void RebuildSplitLayout(bool horizontal, double ratio)
         {
             _editorSplitContainer.Children.Clear();
             _editorSplitContainer.RowDefinitions.Clear();
@@ -3380,11 +3416,14 @@ namespace SpanCoder.Shell
                     Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
                 };
 
+                // Clamp ratio to a reasonable range
+                ratio = Math.Max(0.1, Math.Min(0.9, ratio));
+
                 if (horizontal)
                 {
-                    _editorSplitContainer.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+                    _editorSplitContainer.RowDefinitions.Add(new RowDefinition(new GridLength(ratio, GridUnitType.Star)));
                     _editorSplitContainer.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-                    _editorSplitContainer.RowDefinitions.Add(new RowDefinition(GridLength.Star));
+                    _editorSplitContainer.RowDefinitions.Add(new RowDefinition(new GridLength(1.0 - ratio, GridUnitType.Star)));
 
                     splitter.Height = 4;
                     splitter.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -3401,9 +3440,9 @@ namespace SpanCoder.Shell
                 }
                 else
                 {
-                    _editorSplitContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+                    _editorSplitContainer.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(ratio, GridUnitType.Star)));
                     _editorSplitContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
-                    _editorSplitContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+                    _editorSplitContainer.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1.0 - ratio, GridUnitType.Star)));
 
                     splitter.Width = 4;
                     splitter.VerticalAlignment = VerticalAlignment.Stretch;
@@ -4041,6 +4080,18 @@ namespace SpanCoder.Shell
             if (pasteItem != null) pasteItem.IsEnabled = hasActiveDoc;
         }
 
+        private static readonly Dictionary<string, (string PathData, string Color)> _toolbarIcons = new(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Edit.ToggleLineComment", ("M4,4 H20 V16 H6 L2,20 V4 Z M6,7 H18 M6,11 H14", "#858585") },
+            { "Edit.ToggleBlockComment", ("M3,3 H21 V17 H3 Z M5,5 H19 V15 H5 Z M7,7 L17,13 M17,7 L7,13", "#858585") },
+            { "Build.HotReload", ("M11,15 H6 L13,1 L11,9 H16 L9,23 Z", "#FF8C00") },
+            { "html-preview.show", ("M20,4 H4 C2.9,4 2,4.9 2,6 V18 C2,19.1 2.9,20 4,20 H20 C21.1,20 22,19.1 22,18 V6 C22,4.9 21.1,4 20,4 Z M20,18 H4 V6 H20 V18 Z M6,8 H10 V12 H6 V8 Z", "#D8A0DF") },
+            { "languages.runPython", ("M8,5 V19 L19,12 Z", "#4EC9B0") },
+            { "languages.cargoBuild", ("M20,6 L12,2 L4,6 L12,10 L20,6 Z M4,8 V18 L12,22 L12,12 L4,8 Z M20,8 L12,12 V22 L20,18 V8 Z", "#F05032") },
+            { "python.run", ("M8,5 V19 L19,12 Z", "#306998") },
+            { "prettier.format", ("M3,5 H21 V7 H3 Z M3,11 H21 V13 H3 Z M3,17 H15 V19 H3 Z", "#519ABA") }
+        };
+
         private void AddToolbarButton(string text, string commandId, string tooltip)
         {
             AddToolbarButton("", text, commandId, tooltip);
@@ -4048,16 +4099,46 @@ namespace SpanCoder.Shell
 
         private void AddToolbarButton(string extensionId, string text, string commandId, string tooltip)
         {
+            string cleanText = text;
+            if (cleanText.StartsWith("⚡ "))
+            {
+                cleanText = cleanText.Substring(2);
+            }
+
+            Control contentControl;
+            if (_toolbarIcons.TryGetValue(commandId, out var iconInfo))
+            {
+                var path = new Avalonia.Controls.Shapes.Path
+                {
+                    Width = 16,
+                    Height = 16,
+                    Data = StreamGeometry.Parse(iconInfo.PathData),
+                    Fill = new SolidColorBrush(Color.Parse(iconInfo.Color)),
+                    Stretch = Stretch.Uniform,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                contentControl = path;
+            }
+            else
+            {
+                contentControl = new TextBlock
+                {
+                    Text = text,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontSize = 12
+                };
+            }
+
             var btn = new Button
             {
-                Content = text,
+                Content = contentControl,
                 Background = Brushes.Transparent,
                 Foreground = Brushes.LightGray,
                 BorderBrush = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(8, 4),
-                FontSize = 12,
-                Focusable = false
+                Focusable = false,
+                Cursor = new Cursor(StandardCursorType.Hand)
             };
 
             btn.PointerEntered += (s, e) => {

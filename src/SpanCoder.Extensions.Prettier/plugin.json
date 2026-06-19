@@ -15,6 +15,13 @@
       "category": "Format"
     }
   ],
+  "toolbarItems": [
+    {
+      "commandId": "prettier.format",
+      "displayName": "Format",
+      "orderPriority": 220
+    }
+  ],
   "settings": [
     {
       "id": "prettier-extension.prettierPath",

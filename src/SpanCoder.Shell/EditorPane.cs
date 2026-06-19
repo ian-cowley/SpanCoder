@@ -22,6 +22,10 @@ namespace SpanCoder.Shell
         public StackPanel TabsContainer { get; }
         public Grid EditorGrid { get; }
         public Border Border { get; }
+        public Grid VScrollContainer { get; }
+        public Border SplitHandle { get; }
+        public Grid HScrollContainer { get; }
+        public Border VSplitHandle { get; }
         public List<OpenDocument> OpenDocuments { get; } = new();
         public OpenDocument? ActiveDocument { get; set; }
 
@@ -68,11 +72,9 @@ namespace SpanCoder.Shell
                 Margin = new Thickness(0, 0, 4, 0)
             };
 
-            var btnSplitH = CreateActionButton("—", "Split Horizontally", () => _window.SplitActivePane(true));
             var btnSplitV = CreateActionButton("|", "Split Vertically", () => _window.SplitActivePane(false));
             var btnClose = CreateActionButton("✕", "Close Pane", () => _window.UnsplitPane(this));
 
-            actionsPanel.Children.Add(btnSplitH);
             actionsPanel.Children.Add(btnSplitV);
             actionsPanel.Children.Add(btnClose);
             tabGrid.Children.Add(actionsPanel);
@@ -95,23 +97,216 @@ namespace SpanCoder.Shell
             Grid.SetRow(Canvas, 0);
             Grid.SetColumn(Canvas, 0);
 
+            VScrollContainer = new Grid();
+            VScrollContainer.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Row 0: Split handle
+            VScrollContainer.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Row 1: VScroll
+
+            SplitHandle = new Border
+            {
+                Height = 8,
+                Background = new SolidColorBrush(Color.Parse("#3E3E40")),
+                BorderBrush = new SolidColorBrush(Color.Parse("#252525")),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Cursor = new Cursor(StandardCursorType.SizeNorthSouth),
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            ToolTip.SetTip(SplitHandle, "Drag down to split editor horizontally");
+
+            // Micro-interactions for hover effect
+            SplitHandle.PointerEntered += (s, e) => SplitHandle.Background = new SolidColorBrush(Color.Parse("#505052"));
+            SplitHandle.PointerExited += (s, e) => SplitHandle.Background = new SolidColorBrush(Color.Parse("#3E3E40"));
+
             VScroll = new ScrollBar
             {
                 Orientation = Orientation.Vertical,
                 Width = 16
             };
-            EditorGrid.Children.Add(VScroll);
-            Grid.SetRow(VScroll, 0);
-            Grid.SetColumn(VScroll, 1);
+
+            VScrollContainer.Children.Add(SplitHandle);
+            Grid.SetRow(SplitHandle, 0);
+
+            VScrollContainer.Children.Add(VScroll);
+            Grid.SetRow(VScroll, 1);
+
+            EditorGrid.Children.Add(VScrollContainer);
+            Grid.SetRow(VScrollContainer, 0);
+            Grid.SetColumn(VScrollContainer, 1);
+
+            // Set up HScrollContainer and VSplitHandle (vertical split handle)
+            HScrollContainer = new Grid();
+            HScrollContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Column 0: HScroll
+            HScrollContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Column 1: VSplitHandle
 
             HScroll = new ScrollBar
             {
                 Orientation = Orientation.Horizontal,
                 Height = 16
             };
-            EditorGrid.Children.Add(HScroll);
-            Grid.SetRow(HScroll, 1);
+
+            VSplitHandle = new Border
+            {
+                Width = 8,
+                Background = new SolidColorBrush(Color.Parse("#3E3E40")),
+                BorderBrush = new SolidColorBrush(Color.Parse("#252525")),
+                BorderThickness = new Thickness(1, 0, 0, 0),
+                Cursor = new Cursor(StandardCursorType.SizeWestEast),
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+            ToolTip.SetTip(VSplitHandle, "Drag left to split editor vertically");
+
+            // Micro-interactions for hover effect
+            VSplitHandle.PointerEntered += (s, e) => VSplitHandle.Background = new SolidColorBrush(Color.Parse("#505052"));
+            VSplitHandle.PointerExited += (s, e) => VSplitHandle.Background = new SolidColorBrush(Color.Parse("#3E3E40"));
+
+            HScrollContainer.Children.Add(HScroll);
             Grid.SetColumn(HScroll, 0);
+
+            HScrollContainer.Children.Add(VSplitHandle);
+            Grid.SetColumn(VSplitHandle, 1);
+
+            EditorGrid.Children.Add(HScrollContainer);
+            Grid.SetRow(HScrollContainer, 1);
+            Grid.SetColumn(HScrollContainer, 0);
+
+            // Wiring dragging for horizontal split (SplitHandle)
+            Border? dragPreviewH = null;
+            bool isDraggingH = false;
+
+            SplitHandle.PointerPressed += (s, e) =>
+            {
+                var properties = e.GetCurrentPoint(SplitHandle).Properties;
+                if (properties.IsLeftButtonPressed)
+                {
+                    isDraggingH = true;
+                    e.Pointer.Capture(SplitHandle);
+                    e.Handled = true;
+
+                    // Create preview line overlay
+                    dragPreviewH = new Border
+                    {
+                        Height = 2,
+                        Background = new SolidColorBrush(Color.Parse("#007ACC")),
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        ZIndex = 999,
+                        IsHitTestVisible = false
+                    };
+                    Children.Add(dragPreviewH);
+                    Grid.SetRowSpan(dragPreviewH, 2);
+                }
+            };
+
+            SplitHandle.PointerMoved += (s, e) =>
+            {
+                if (isDraggingH && dragPreviewH != null)
+                {
+                    var relativePoint = e.GetPosition(this);
+                    dragPreviewH.Margin = new Thickness(0, relativePoint.Y, 0, 0);
+                    e.Handled = true;
+                }
+            };
+
+            Action finishDragH = () =>
+            {
+                if (isDraggingH)
+                {
+                    isDraggingH = false;
+                    if (dragPreviewH != null)
+                    {
+                        Children.Remove(dragPreviewH);
+                        dragPreviewH = null;
+                    }
+                }
+            };
+
+            SplitHandle.PointerReleased += (s, e) =>
+            {
+                if (isDraggingH)
+                {
+                    var relativePoint = e.GetPosition(this);
+                    e.Pointer.Capture(null);
+                    finishDragH();
+
+                    if (relativePoint.Y > 30 && relativePoint.Y < Bounds.Height - 30)
+                    {
+                        double ratio = relativePoint.Y / Bounds.Height;
+                        _window.SplitActivePane(true, ratio);
+                    }
+                    e.Handled = true;
+                }
+            };
+
+            SplitHandle.PointerCaptureLost += (s, e) => finishDragH();
+
+            // Wiring dragging for vertical split (VSplitHandle)
+            Border? dragPreviewV = null;
+            bool isDraggingV = false;
+
+            VSplitHandle.PointerPressed += (s, e) =>
+            {
+                var properties = e.GetCurrentPoint(VSplitHandle).Properties;
+                if (properties.IsLeftButtonPressed)
+                {
+                    isDraggingV = true;
+                    e.Pointer.Capture(VSplitHandle);
+                    e.Handled = true;
+
+                    // Create preview line overlay
+                    dragPreviewV = new Border
+                    {
+                        Width = 2,
+                        Background = new SolidColorBrush(Color.Parse("#007ACC")),
+                        VerticalAlignment = VerticalAlignment.Stretch,
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                        ZIndex = 999,
+                        IsHitTestVisible = false
+                    };
+                    Children.Add(dragPreviewV);
+                    Grid.SetRowSpan(dragPreviewV, 2);
+                }
+            };
+
+            VSplitHandle.PointerMoved += (s, e) =>
+            {
+                if (isDraggingV && dragPreviewV != null)
+                {
+                    var relativePoint = e.GetPosition(this);
+                    dragPreviewV.Margin = new Thickness(relativePoint.X, 0, 0, 0);
+                    e.Handled = true;
+                }
+            };
+
+            Action finishDragV = () =>
+            {
+                if (isDraggingV)
+                {
+                    isDraggingV = false;
+                    if (dragPreviewV != null)
+                    {
+                        Children.Remove(dragPreviewV);
+                        dragPreviewV = null;
+                    }
+                }
+            };
+
+            VSplitHandle.PointerReleased += (s, e) =>
+            {
+                if (isDraggingV)
+                {
+                    var relativePoint = e.GetPosition(this);
+                    e.Pointer.Capture(null);
+                    finishDragV();
+
+                    if (relativePoint.X > 30 && relativePoint.X < Bounds.Width - 30)
+                    {
+                        double ratio = relativePoint.X / Bounds.Width;
+                        _window.SplitActivePane(false, ratio);
+                    }
+                    e.Handled = true;
+                }
+            };
+
+            VSplitHandle.PointerCaptureLost += (s, e) => finishDragV();
 
             // Editor border to show active focus border outline
             Border = new Border
@@ -156,6 +351,8 @@ namespace SpanCoder.Shell
                 Canvas.ScrollX = e.NewValue;
                 Canvas.InvalidateVisual();
             };
+
+            UpdateSplitHandlesVisibility();
         }
 
         private Button CreateActionButton(string text, string tooltip, Action action)
@@ -252,14 +449,14 @@ namespace SpanCoder.Shell
             if (ActiveDocument != null && ActiveDocument.FilePath.StartsWith("extension://"))
             {
                 Canvas.IsVisible = false;
-                VScroll.IsVisible = false;
-                HScroll.IsVisible = false;
+                VScrollContainer.IsVisible = false;
+                HScrollContainer.IsVisible = false;
 
                 // Remove existing Custom views if any
                 var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
                     c != Canvas && 
-                    c != VScroll && 
-                    c != HScroll && 
+                    c != VScrollContainer && 
+                    c != HScrollContainer && 
                     !(c is FindReplaceOverlay) && 
                     c != _window._autocompleteBorder && 
                     c != _window._hoverBorder && 
@@ -285,14 +482,14 @@ namespace SpanCoder.Shell
             else if (ActiveDocument != null && ActiveDocument.FilePath.StartsWith("gitdiff://"))
             {
                 Canvas.IsVisible = false;
-                VScroll.IsVisible = false;
-                HScroll.IsVisible = false;
+                VScrollContainer.IsVisible = false;
+                HScrollContainer.IsVisible = false;
 
                 // Remove existing Custom views if any
                 var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
                     c != Canvas && 
-                    c != VScroll && 
-                    c != HScroll && 
+                    c != VScrollContainer && 
+                    c != HScrollContainer && 
                     !(c is FindReplaceOverlay) && 
                     c != _window._autocompleteBorder && 
                     c != _window._hoverBorder && 
@@ -318,14 +515,14 @@ namespace SpanCoder.Shell
             else
             {
                 Canvas.IsVisible = true;
-                VScroll.IsVisible = true;
-                HScroll.IsVisible = true;
+                VScrollContainer.IsVisible = true;
+                HScrollContainer.IsVisible = true;
 
                 // Remove existing Custom views if any
                 var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
                     c != Canvas && 
-                    c != VScroll && 
-                    c != HScroll && 
+                    c != VScrollContainer && 
+                    c != HScrollContainer && 
                     !(c is FindReplaceOverlay) && 
                     c != _window._autocompleteBorder && 
                     c != _window._hoverBorder && 
@@ -348,6 +545,13 @@ namespace SpanCoder.Shell
                 Grid.SetColumn(FindReplaceOverlay, 0);
             }
             FindReplaceOverlay.Show(showReplace);
+        }
+
+        public void UpdateSplitHandlesVisibility()
+        {
+            bool isSplit = _window.EditorPanesCount >= 2;
+            SplitHandle.IsVisible = !isSplit;
+            VSplitHandle.IsVisible = !isSplit;
         }
     }
 }

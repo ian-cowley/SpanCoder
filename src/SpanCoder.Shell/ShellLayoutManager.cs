@@ -88,6 +88,25 @@ namespace SpanCoder.Shell
                 }
             }
 
+            // Rearrange root menus so that they follow: File, Edit, View, Debug, Tools, Collab
+            var desiredOrder = new List<string> { "File", "Edit", "View", "Debug", "Tools", "Collab" };
+            var rootList = mainMenu.Items.OfType<MenuItem>().ToList();
+            mainMenu.Items.Clear();
+            foreach (var header in desiredOrder)
+            {
+                var match = rootList.FirstOrDefault(x => string.Equals(x.Header as string, header, StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    mainMenu.Items.Add(match);
+                    rootList.Remove(match);
+                }
+            }
+            // Add any remaining root menus that were not in the desired list
+            foreach (var remaining in rootList)
+            {
+                mainMenu.Items.Add(remaining);
+            }
+
             return mainMenu;
         }
     }

@@ -143,9 +143,14 @@ namespace SpanCoder.Engine
                     executable = "gopls";
                     arguments = "";
                 }
-                else if ((e == ".cpp" || e == ".cc" || e == ".h" || e == ".hpp") && LspClient.IsCommandOnPath("clangd"))
+                else if ((e == ".c" || e == ".cpp" || e == ".cc" || e == ".h" || e == ".hpp") && LspClient.IsCommandOnPath("clangd"))
                 {
                     executable = "clangd";
+                    arguments = "";
+                }
+                else if (e == ".java" && LspClient.IsCommandOnPath("jdtls"))
+                {
+                    executable = "jdtls";
                     arguments = "";
                 }
                 else
@@ -739,31 +744,106 @@ namespace SpanCoder.Engine
                             }
                         );
 
-                        string executable = "";
-                        string arguments = "";
-                        if (LspClient.IsCommandOnPath("netcoredbg"))
+                        string debugType = "coreclr";
+                        string gdbPath = "gdb-multiarch";
+                        string customProgram = "";
+                        
+                        string? debugConfigPath = null;
+                        string? currentDir = Path.GetDirectoryName(programPath);
+                        while (!string.IsNullOrEmpty(currentDir))
                         {
-                            executable = "netcoredbg";
-                            arguments = "--interpreter=dap";
-                        }
-                        else
-                        {
-                            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                            executable = Path.Combine(baseDir, "SpanCoder.Engine.exe");
-                            if (!File.Exists(executable))
+                            string checkPath = Path.Combine(currentDir, "spancoder_debug.json");
+                            if (File.Exists(checkPath))
                             {
-                                executable = Path.Combine(baseDir, "SpanCoder.Engine");
+                                debugConfigPath = checkPath;
+                                break;
                             }
-                            arguments = "--mock-dap";
-                            if (!File.Exists(executable))
+                            currentDir = Path.GetDirectoryName(currentDir);
+                        }
+
+                        if (debugConfigPath != null)
+                        {
+                            try
                             {
-                                executable = "dotnet";
-                                string dllPath = Path.Combine(baseDir, "SpanCoder.Engine.dll");
-                                arguments = $"\"{dllPath}\" --mock-dap";
+                                string json = File.ReadAllText(debugConfigPath);
+                                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                                if (doc.RootElement.TryGetProperty("type", out var typeProp))
+                                {
+                                    debugType = typeProp.GetString() ?? "coreclr";
+                                }
+                                if (doc.RootElement.TryGetProperty("gdbPath", out var gdbProp))
+                                {
+                                    gdbPath = gdbProp.GetString() ?? "gdb-multiarch";
+                                }
+                                if (doc.RootElement.TryGetProperty("program", out var progProp))
+                                {
+                                    customProgram = progProp.GetString() ?? "";
+                                    if (!string.IsNullOrEmpty(customProgram) && !Path.IsPathRooted(customProgram) && debugConfigPath != null)
+                                    {
+                                        customProgram = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(debugConfigPath)!, customProgram));
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[EngineHost] Error parsing spancoder_debug.json: {ex.Message}");
                             }
                         }
 
-                        _dapClient.Start(executable, arguments, programPath);
+                        string executable = "";
+                        string arguments = "";
+
+                        if (debugType.Equals("silicon", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string targetProgram = string.IsNullOrEmpty(customProgram) ? programPath : customProgram;
+                            if (LspClient.IsCommandOnPath(gdbPath))
+                            {
+                                executable = gdbPath;
+                                arguments = "--interpreter=dap";
+                            }
+                            else
+                            {
+                                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                                executable = Path.Combine(baseDir, "SpanCoder.Engine.exe");
+                                if (!File.Exists(executable))
+                                {
+                                    executable = Path.Combine(baseDir, "SpanCoder.Engine");
+                                }
+                                arguments = "--mock-silicon-dap";
+                                if (!File.Exists(executable))
+                                {
+                                    executable = "dotnet";
+                                    string dllPath = Path.Combine(baseDir, "SpanCoder.Engine.dll");
+                                    arguments = $"\"{dllPath}\" --mock-silicon-dap";
+                                }
+                            }
+                            _dapClient.Start(executable, arguments, targetProgram);
+                        }
+                        else
+                        {
+                            if (LspClient.IsCommandOnPath("netcoredbg"))
+                            {
+                                executable = "netcoredbg";
+                                arguments = "--interpreter=dap";
+                            }
+                            else
+                            {
+                                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                                executable = Path.Combine(baseDir, "SpanCoder.Engine.exe");
+                                if (!File.Exists(executable))
+                                {
+                                    executable = Path.Combine(baseDir, "SpanCoder.Engine");
+                                }
+                                arguments = "--mock-dap";
+                                if (!File.Exists(executable))
+                                {
+                                    executable = "dotnet";
+                                    string dllPath = Path.Combine(baseDir, "SpanCoder.Engine.dll");
+                                    arguments = $"\"{dllPath}\" --mock-dap";
+                                }
+                            }
+                            _dapClient.Start(executable, arguments, programPath);
+                        }
                         break;
                     }
 

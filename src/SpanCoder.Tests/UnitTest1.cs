@@ -1001,11 +1001,16 @@ EndGlobal";
         Assert.Equal("languages-extension", receivedManifest.Value.Id);
         
         var languages = receivedManifest.Value.Languages;
-        Assert.Equal(4, languages.Count);
+        Assert.Equal(9, languages.Count);
         Assert.Contains(languages, l => l.Extension == ".py");
         Assert.Contains(languages, l => l.Extension == ".cpp");
         Assert.Contains(languages, l => l.Extension == ".rs");
         Assert.Contains(languages, l => l.Extension == ".go");
+        Assert.Contains(languages, l => l.Extension == ".c");
+        Assert.Contains(languages, l => l.Extension == ".cc");
+        Assert.Contains(languages, l => l.Extension == ".h");
+        Assert.Contains(languages, l => l.Extension == ".hpp");
+        Assert.Contains(languages, l => l.Extension == ".java");
 
         var toolbarItems = receivedManifest.Value.ToolbarItems;
         Assert.Equal(2, toolbarItems.Count);
@@ -1213,4 +1218,82 @@ EndGlobal";
         
         Assert.True(pty.IsFallback || !pty.IsFallback);
     }
+
+    [Fact]
+    public void TestKeybindingsNormalization()
+    {
+        Assert.Equal("Ctrl+Oem2", KeybindingsManager.NormalizeShortcut("Ctrl+/"));
+        Assert.Equal("Ctrl+Shift+Oem2", KeybindingsManager.NormalizeShortcut("Ctrl+Shift+/"));
+        Assert.Equal("Oem2", KeybindingsManager.NormalizeShortcut("/"));
+        Assert.Equal("Ctrl+S", KeybindingsManager.NormalizeShortcut("Ctrl+S"));
+        Assert.Equal("", KeybindingsManager.NormalizeShortcut(""));
+    }
+
+    [Fact]
+    public void TestSiliconDebugConfiguration()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        string configPath = Path.Combine(tempDir, "spancoder_debug.json");
+
+        try
+        {
+            using (var stream = new MemoryStream())
+            {
+                using (var writer = new System.Text.Json.Utf8JsonWriter(stream, new System.Text.Json.JsonWriterOptions { Indented = true }))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "silicon");
+                    writer.WriteString("gdbPath", "arm-none-eabi-gdb");
+                    writer.WriteString("program", "build/test.elf");
+                    writer.WriteString("target", "localhost:3333");
+                    writer.WriteString("deployCmd", "openocd -f probe.cfg");
+                    
+                    writer.WriteStartArray("autorun");
+                    writer.WriteStringValue("target remote localhost:3333");
+                    writer.WriteStringValue("load");
+                    writer.WriteEndArray();
+
+                    writer.WriteEndObject();
+                }
+                File.WriteAllText(configPath, System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+            }
+
+            Assert.True(File.Exists(configPath));
+            string json = File.ReadAllText(configPath);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            Assert.Equal("silicon", root.GetProperty("type").GetString());
+            Assert.Equal("arm-none-eabi-gdb", root.GetProperty("gdbPath").GetString());
+            Assert.Equal("build/test.elf", root.GetProperty("program").GetString());
+            Assert.Equal("localhost:3333", root.GetProperty("target").GetString());
+            Assert.Equal("openocd -f probe.cfg", root.GetProperty("deployCmd").GetString());
+            
+            var autorun = root.GetProperty("autorun");
+            Assert.Equal(2, autorun.GetArrayLength());
+            Assert.Equal("target remote localhost:3333", autorun[0].GetString());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void TestMockSiliconDapServerInitialize()
+    {
+        string json = "{\"command\":\"initialize\",\"seq\":1,\"type\":\"request\",\"arguments\":{}}";
+        string initRequest = $"Content-Length: {json.Length}\r\n\r\n{json}";
+        using var stdin = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(initRequest));
+        using var stdout = new MemoryStream();
+
+        SpanCoder.Engine.MockSiliconDapServer.Run(stdin, stdout);
+
+        stdout.Position = 0;
+        string output = System.Text.Encoding.UTF8.GetString(stdout.ToArray());
+        Assert.Contains("\"command\":\"initialize\"", output);
+        Assert.Contains("\"success\":true", output);
+        Assert.Contains("supportsConfigurationDoneRequest", output);
+    }
 }
+

@@ -63,6 +63,73 @@
         "uint16", "uint32", "uint64", "uintptr", "byte", "rune", "float32", "float64",
         "complex64", "complex128", "error"
       ]
+    },
+    {
+      "extension": ".c",
+      "lineComment": "//",
+      "blockCommentStart": "/*",
+      "blockCommentEnd": "*/",
+      "keywords": [
+        "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum", "extern",
+        "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return", "short", "signed",
+        "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void", "volatile", "while"
+      ],
+      "types": [
+        "char", "double", "float", "int", "long", "short", "signed", "unsigned", "void", "size_t", "ssize_t",
+        "intptr_t", "uintptr_t", "ptrdiff_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t"
+      ]
+    },
+    {
+      "extension": ".cc",
+      "lineComment": "//",
+      "blockCommentStart": "/*",
+      "blockCommentEnd": "*/",
+      "keywords": [
+        "alignas", "alignof", "asm", "auto", "break", "case", "catch", "class", "concept", "const", "consteval", "constexpr", "constinit", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "else", "enum", "explicit", "export", "extern", "false", "for", "friend", "goto", "if", "inline", "mutable", "namespace", "new", "noexcept", "nullptr", "operator", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "using", "virtual", "volatile", "while"
+      ],
+      "types": [
+        "bool", "char", "char8_t", "char16_t", "char32_t", "double", "float", "int", "long", "short", "signed", "unsigned", "void", "wchar_t", "size_t", "std"
+      ]
+    },
+    {
+      "extension": ".h",
+      "lineComment": "//",
+      "blockCommentStart": "/*",
+      "blockCommentEnd": "*/",
+      "keywords": [
+        "alignas", "alignof", "asm", "auto", "break", "case", "catch", "class", "concept", "const", "consteval", "constexpr", "constinit", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "else", "enum", "explicit", "export", "extern", "false", "for", "friend", "goto", "if", "inline", "mutable", "namespace", "new", "noexcept", "nullptr", "operator", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "using", "virtual", "volatile", "while"
+      ],
+      "types": [
+        "bool", "char", "char8_t", "char16_t", "char32_t", "double", "float", "int", "long", "short", "signed", "unsigned", "void", "wchar_t", "size_t", "std", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t"
+      ]
+    },
+    {
+      "extension": ".hpp",
+      "lineComment": "//",
+      "blockCommentStart": "/*",
+      "blockCommentEnd": "*/",
+      "keywords": [
+        "alignas", "alignof", "asm", "auto", "break", "case", "catch", "class", "concept", "const", "consteval", "constexpr", "constinit", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "else", "enum", "explicit", "export", "extern", "false", "for", "friend", "goto", "if", "inline", "mutable", "namespace", "new", "noexcept", "nullptr", "operator", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "using", "virtual", "volatile", "while"
+      ],
+      "types": [
+        "bool", "char", "char8_t", "char16_t", "char32_t", "double", "float", "int", "long", "short", "signed", "unsigned", "void", "wchar_t", "size_t", "std"
+      ]
+    },
+    {
+      "extension": ".java",
+      "lineComment": "//",
+      "blockCommentStart": "/*",
+      "blockCommentEnd": "*/",
+      "keywords": [
+        "abstract", "assert", "break", "case", "catch", "class", "const", "continue", "default", "do", "else", "enum", "extends",
+        "final", "finally", "for", "goto", "if", "implements", "import", "instanceof", "interface", "native", "new", "package",
+        "private", "protected", "public", "return", "static", "strictfp", "super", "switch", "synchronized", "this", "throw",
+        "throws", "transient", "try", "volatile", "while"
+      ],
+      "types": [
+        "boolean", "byte", "char", "double", "float", "int", "long", "short", "void", "String", "Object", "System", "Class",
+        "Integer", "Long", "Double", "Float", "Boolean", "Byte", "Character", "Short", "List", "ArrayList", "Map", "HashMap"
+      ]
     }
   ],
   "commands": [

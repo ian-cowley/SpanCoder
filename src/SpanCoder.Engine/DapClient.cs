@@ -50,7 +50,62 @@ namespace SpanCoder.Engine
 
                 // 2. Launch Request
                 string escapedPath = EscapeJsonString(programPath).Replace("\\", "/");
-                SendRequest("launch", $"{{\"noDebug\":false,\"program\":\"{escapedPath}\",\"args\":[]}}");
+                string launchArgs = $"{{\"noDebug\":false,\"program\":\"{escapedPath}\",\"args\":[]}}";
+
+                string? debugConfigPath = null;
+                string? currentDir = Path.GetDirectoryName(programPath);
+                while (!string.IsNullOrEmpty(currentDir))
+                {
+                    string checkPath = Path.Combine(currentDir, "spancoder_debug.json");
+                    if (File.Exists(checkPath))
+                    {
+                        debugConfigPath = checkPath;
+                        break;
+                    }
+                    currentDir = Path.GetDirectoryName(currentDir);
+                }
+
+                if (debugConfigPath != null)
+                {
+                    try
+                    {
+                        string json = File.ReadAllText(debugConfigPath);
+                        using var doc = JsonDocument.Parse(json);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("type", out var typeProp) && typeProp.GetString() == "silicon")
+                        {
+                            var sb = new StringBuilder();
+                            sb.Append("{");
+                            sb.Append($"\"program\":\"{escapedPath}\"");
+                            sb.Append(",\"noDebug\":false");
+                            if (root.TryGetProperty("gdbPath", out var gdbProp))
+                            {
+                                sb.Append($",\"gdbpath\":\"{EscapeJsonString(gdbProp.GetString() ?? "")}\"");
+                            }
+                            if (root.TryGetProperty("target", out var targetProp))
+                            {
+                                sb.Append($",\"target\":\"{EscapeJsonString(targetProp.GetString() ?? "")}\"");
+                            }
+                            if (root.TryGetProperty("autorun", out var autorunProp) && autorunProp.ValueKind == JsonValueKind.Array)
+                            {
+                                sb.Append(",\"autorun\":[");
+                                bool first = true;
+                                foreach (var item in autorunProp.EnumerateArray())
+                                {
+                                    if (!first) sb.Append(",");
+                                    first = false;
+                                    sb.Append($"\"{EscapeJsonString(item.GetString() ?? "")}\"");
+                                }
+                                sb.Append("]");
+                            }
+                            sb.Append("}");
+                            launchArgs = sb.ToString();
+                        }
+                    }
+                    catch { }
+                }
+
+                SendRequest("launch", launchArgs);
             }
             catch (Exception ex)
             {

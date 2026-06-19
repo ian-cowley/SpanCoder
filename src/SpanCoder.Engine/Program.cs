@@ -22,6 +22,11 @@ namespace SpanCoder.Engine
                     MockDapServer.Run();
                     return;
                 }
+                if (args[i] == "--mock-silicon-dap")
+                {
+                    MockSiliconDapServer.Run();
+                    return;
+                }
             }
 
             int port = 0;

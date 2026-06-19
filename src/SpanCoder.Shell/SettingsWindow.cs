@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using SpanCoder.Contracts;
 
 namespace SpanCoder.Shell
 {
@@ -14,9 +15,12 @@ namespace SpanCoder.Shell
         private readonly ListBox _categoryList;
         private readonly StackPanel _settingsContainer;
         private readonly TextBox _searchBox;
+        private readonly Grid _mainGrid;
+        private readonly ShellWindow? _shellWindow;
 
-        public SettingsWindow()
+        public SettingsWindow(ShellWindow? shellWindow = null)
         {
+            _shellWindow = shellWindow;
             Title = "Settings";
             Width = 650;
             Height = 500;
@@ -25,6 +29,7 @@ namespace SpanCoder.Shell
             Foreground = Brushes.LightGray;
 
             var mainGrid = new Grid();
+            _mainGrid = mainGrid;
             mainGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Search bar
             mainGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Main split
 
@@ -99,7 +104,7 @@ namespace SpanCoder.Shell
 
         private void LoadCategories()
         {
-            var categories = new List<string> { "All", "Text Editor", "Workbench", "AI Settings", "Extensions" };
+            var categories = new List<string> { "All", "Text Editor", "Workbench", "AI Settings", "Extensions", "Keyboard Shortcuts", "Hardware Debugging" };
             _categoryList.ItemsSource = categories;
             _categoryList.SelectedIndex = 0;
         }
@@ -109,6 +114,18 @@ namespace SpanCoder.Shell
             _settingsContainer.Children.Clear();
             string selectedCat = _categoryList.SelectedItem as string ?? "All";
             string query = _searchBox.Text ?? "";
+
+            if (selectedCat == "Keyboard Shortcuts")
+            {
+                RenderKeyboardShortcuts(query);
+                return;
+            }
+
+            if (selectedCat == "Hardware Debugging")
+            {
+                RenderHardwareDebuggingSettings();
+                return;
+            }
 
             var descriptors = SettingsManager.GetDescriptors();
             foreach (var desc in descriptors)
@@ -185,6 +202,352 @@ namespace SpanCoder.Shell
 
                 _settingsContainer.Children.Add(settingPanel);
             }
+        }
+
+        private void RenderKeyboardShortcuts(string query)
+        {
+            var allCommands = new List<CommandDescriptor>();
+            allCommands.AddRange(GeneratedCommandRegistry.Commands);
+            if (_shellWindow != null)
+            {
+                allCommands.AddRange(_shellWindow.ExtensionCommands);
+            }
+
+            foreach (var cmd in allCommands)
+            {
+                if (!string.IsNullOrEmpty(query))
+                {
+                    bool match = cmd.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                 cmd.Id.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                 cmd.DefaultShortcut.Contains(query, StringComparison.OrdinalIgnoreCase);
+                    if (!match) continue;
+                }
+
+                var rowPanel = new Grid
+                {
+                    Margin = new Thickness(0, 4),
+                    ColumnDefinitions = new ColumnDefinitions("*,Auto")
+                };
+
+                var textStack = new StackPanel { Spacing = 2 };
+                
+                var label = new TextBlock
+                {
+                    Text = cmd.DisplayName,
+                    Foreground = Brushes.White,
+                    FontWeight = FontWeight.Bold,
+                    FontSize = 13
+                };
+                textStack.Children.Add(label);
+
+                var activeShortcut = KeybindingsManager.GetShortcut(cmd.Id, cmd.DefaultShortcut);
+                string displayShortcut = string.IsNullOrEmpty(activeShortcut) ? "None" : activeShortcut;
+                bool isCustom = KeybindingsManager.HasCustomShortcut(cmd.Id);
+
+                var descLabel = new TextBlock
+                {
+                    Text = $"{cmd.Id}  •  Keys: {displayShortcut}{(isCustom ? " (custom)" : "")}",
+                    Foreground = isCustom ? Brushes.SkyBlue : Brushes.Gray,
+                    FontSize = 10
+                };
+                textStack.Children.Add(descLabel);
+
+                rowPanel.Children.Add(textStack);
+                Grid.SetColumn(textStack, 0);
+
+                var buttonStack = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6
+                };
+
+                var editBtn = new Button
+                {
+                    Content = "Edit",
+                    Background = new SolidColorBrush(Color.Parse("#3E3E42")),
+                    Foreground = Brushes.White,
+                    FontSize = 11,
+                    Padding = new Thickness(8, 2),
+                    BorderThickness = new Thickness(0)
+                };
+                var cmdRef = cmd; // capture variable
+                editBtn.Click += (s, e) => ShowKeybindingsRemapper(cmdRef);
+                buttonStack.Children.Add(editBtn);
+
+                if (isCustom)
+                {
+                    var resetBtn = new Button
+                    {
+                        Content = "Reset",
+                        Background = new SolidColorBrush(Color.Parse("#3E3E42")),
+                        Foreground = Brushes.LightGray,
+                        FontSize = 11,
+                        Padding = new Thickness(8, 2),
+                        BorderThickness = new Thickness(0)
+                    };
+                    resetBtn.Click += (s, e) =>
+                    {
+                        KeybindingsManager.ResetShortcut(cmdRef.Id);
+                        RefreshSettingsList();
+                    };
+                    buttonStack.Children.Add(resetBtn);
+                }
+
+                rowPanel.Children.Add(buttonStack);
+                Grid.SetColumn(buttonStack, 1);
+
+                _settingsContainer.Children.Add(rowPanel);
+                
+                // Add a divider
+                _settingsContainer.Children.Add(new Border
+                {
+                    Height = 1,
+                    Background = new SolidColorBrush(Color.Parse("#2D2D2D")),
+                    Margin = new Thickness(0, 4)
+                });
+            }
+        }
+
+        private void ShowKeybindingsRemapper(CommandDescriptor cmd)
+        {
+            var overlay = new Border
+            {
+                Background = new SolidColorBrush(Color.Parse("#CC121212")),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+            Grid.SetRowSpan(overlay, 2);
+
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.Parse("#252526")),
+                BorderBrush = new SolidColorBrush(Color.Parse("#3E3E42")),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(24),
+                CornerRadius = new CornerRadius(4),
+                Width = 400,
+                Height = 220,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var layout = new StackPanel { Spacing = 12 };
+
+            var title = new TextBlock
+            {
+                Text = $"Remap: {cmd.DisplayName}",
+                Foreground = Brushes.White,
+                FontSize = 15,
+                FontWeight = FontWeight.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            layout.Children.Add(title);
+
+            var instructions = new TextBlock
+            {
+                Text = "Press the key combination you want to bind, then press Enter to save. Press Esc to cancel.",
+                Foreground = Brushes.LightGray,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            layout.Children.Add(instructions);
+
+            string capturedShortcut = "";
+
+            var keysText = new TextBlock
+            {
+                Text = "Press keys...",
+                Foreground = Brushes.SkyBlue,
+                FontSize = 18,
+                FontWeight = FontWeight.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 12, 0, 12)
+            };
+            layout.Children.Add(keysText);
+
+            var warningText = new TextBlock
+            {
+                Text = "",
+                Foreground = Brushes.Red,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 4, 0, 4),
+                IsVisible = false
+            };
+            layout.Children.Add(warningText);
+
+            card.Child = layout;
+            overlay.Child = card;
+
+            _mainGrid.Children.Add(overlay);
+
+            bool isConfirmingConflict = false;
+            CommandDescriptor? conflictingCmd = null;
+
+            overlay.Focusable = true;
+            overlay.KeyDown += (sender, ke) =>
+            {
+                ke.Handled = true;
+
+                var mods = ke.KeyModifiers;
+                var key = ke.Key;
+
+                // Ignore modifier-only key presses (like pressing Ctrl alone)
+                if (key == Key.LeftCtrl || key == Key.RightCtrl ||
+                    key == Key.LeftShift || key == Key.RightShift ||
+                    key == Key.LeftAlt || key == Key.RightAlt ||
+                    key == Key.LWin || key == Key.RWin)
+                {
+                    return;
+                }
+
+                // If Enter is pressed, save
+                if (key == Key.Enter)
+                {
+                    if (!string.IsNullOrEmpty(capturedShortcut))
+                    {
+                        if (conflictingCmd != null && !isConfirmingConflict)
+                        {
+                            warningText.Text = $"Already bound to '{conflictingCmd.Value.DisplayName}'. Press Enter again to overwrite.";
+                            warningText.IsVisible = true;
+                            isConfirmingConflict = true;
+                            return;
+                        }
+
+                        if (isConfirmingConflict && conflictingCmd != null)
+                        {
+                            // Overwrite conflict
+                            KeybindingsManager.SetShortcut(conflictingCmd.Value.Id, "");
+                        }
+
+                        KeybindingsManager.SetShortcut(cmd.Id, capturedShortcut);
+                    }
+                    _mainGrid.Children.Remove(overlay);
+                    RefreshSettingsList();
+                    return;
+                }
+
+                // If Escape is pressed, cancel
+                if (key == Key.Escape)
+                {
+                    _mainGrid.Children.Remove(overlay);
+                    return;
+                }
+
+                // Reset conflict state on new keypress
+                isConfirmingConflict = false;
+                conflictingCmd = null;
+                warningText.IsVisible = false;
+
+                // Build gesture string
+                var parts = new List<string>();
+                if (mods.HasFlag(KeyModifiers.Control)) parts.Add("Ctrl");
+                if (mods.HasFlag(KeyModifiers.Shift)) parts.Add("Shift");
+                if (mods.HasFlag(KeyModifiers.Alt)) parts.Add("Alt");
+                if (mods.HasFlag(KeyModifiers.Meta)) parts.Add("Windows");
+
+                parts.Add(GetKeyName(key));
+                capturedShortcut = string.Join("+", parts);
+                keysText.Text = capturedShortcut;
+
+                // Check conflict
+                conflictingCmd = CheckConflict(cmd.Id, capturedShortcut);
+                if (conflictingCmd != null)
+                {
+                    warningText.Text = $"Conflicts with '{conflictingCmd.Value.DisplayName}'. Press Enter to overwrite.";
+                    warningText.IsVisible = true;
+                }
+            };
+
+            // Focus the overlay so it receives KeyDown events immediately
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => overlay.Focus(), Avalonia.Threading.DispatcherPriority.Background);
+        }
+
+        private CommandDescriptor? CheckConflict(string currentCommandId, string shortcut)
+        {
+            var allCommands = new List<CommandDescriptor>();
+            allCommands.AddRange(GeneratedCommandRegistry.Commands);
+            if (_shellWindow != null)
+            {
+                allCommands.AddRange(_shellWindow.ExtensionCommands);
+            }
+
+            foreach (var cmd in allCommands)
+            {
+                if (cmd.Id == currentCommandId) continue;
+                string existing = KeybindingsManager.GetShortcut(cmd.Id, cmd.DefaultShortcut);
+                if (string.Equals(existing, shortcut, StringComparison.OrdinalIgnoreCase))
+                {
+                    return cmd;
+                }
+            }
+            return null;
+        }
+
+        private string GetKeyName(Key key)
+        {
+            if (key >= Key.D0 && key <= Key.D9)
+            {
+                return (key - Key.D0).ToString();
+            }
+            if (key >= Key.NumPad0 && key <= Key.NumPad9)
+            {
+                return (key - Key.NumPad0).ToString();
+            }
+            switch (key)
+            {
+                case Key.OemPlus:
+                case Key.Add:
+                    return "Plus";
+                case Key.OemMinus:
+                case Key.Subtract:
+                    return "Minus";
+                default:
+                    return key.ToString();
+            }
+        }
+
+        private void RenderHardwareDebuggingSettings()
+        {
+            var header = new TextBlock
+            {
+                Text = "Microcontroller Hardware Debugging & Deployments",
+                Foreground = Brushes.White,
+                FontWeight = FontWeight.Bold,
+                FontSize = 14,
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            _settingsContainer.Children.Add(header);
+
+            var desc = new TextBlock
+            {
+                Text = "SpanCoder supports target hardware firmware deployment and GDB-based silicon debugging. You can configure active probes, flash tools, and target connections directly in your workspace.",
+                Foreground = Brushes.LightGray,
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 16)
+            };
+            _settingsContainer.Children.Add(desc);
+
+            var configBtn = new Button
+            {
+                Content = "Configure Deploy & Debug Settings...",
+                Background = new SolidColorBrush(Color.Parse("#007ACC")),
+                Foreground = Brushes.White,
+                FontSize = 12,
+                Padding = new Thickness(16, 6)
+            };
+            configBtn.Click += (s, e) =>
+            {
+                if (_shellWindow != null)
+                {
+                    var dlg = new HardwareDeployWindow(_shellWindow);
+                    dlg.ShowDialog(this);
+                }
+            };
+            _settingsContainer.Children.Add(configBtn);
         }
     }
 }

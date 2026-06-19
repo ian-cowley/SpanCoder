@@ -516,6 +516,20 @@ namespace SpanCoder.Shell
         {
             var menu = new ContextMenu();
 
+            var buildItem = new MenuItem { Header = "Build" };
+            buildItem.Click += async (s, e) => await HandleBuildSolution(solutionPath, "");
+            menu.Items.Add(buildItem);
+
+            var rebuildItem = new MenuItem { Header = "Rebuild" };
+            rebuildItem.Click += async (s, e) => await HandleBuildSolution(solutionPath, "--no-incremental");
+            menu.Items.Add(rebuildItem);
+
+            var cleanItem = new MenuItem { Header = "Clean" };
+            cleanItem.Click += async (s, e) => await HandleCleanSolution(solutionPath);
+            menu.Items.Add(cleanItem);
+
+            menu.Items.Add(new Separator());
+
             var addMenu = new MenuItem { Header = "Add" };
             menu.Items.Add(addMenu);
 
@@ -532,6 +546,26 @@ namespace SpanCoder.Shell
             solutionFolderItem.Click += async (s, e) => await HandleAddSolutionFolder(solutionPath, targetFolder);
 
             return menu;
+        }
+
+        private async Task HandleBuildSolution(string solutionPath, string extraArgs)
+        {
+            string solutionDir = Path.GetDirectoryName(solutionPath) ?? "";
+            string solutionName = Path.GetFileNameWithoutExtension(solutionPath);
+            string args = $"build \"{solutionPath}\"";
+            if (!string.IsNullOrEmpty(extraArgs))
+            {
+                args += " " + extraArgs;
+            }
+            string taskName = string.IsNullOrEmpty(extraArgs) ? "Build" : "Rebuild";
+            await RunDotnetCommand(solutionDir, args, $"{taskName} {solutionName}");
+        }
+
+        private async Task HandleCleanSolution(string solutionPath)
+        {
+            string solutionDir = Path.GetDirectoryName(solutionPath) ?? "";
+            string solutionName = Path.GetFileNameWithoutExtension(solutionPath);
+            await RunDotnetCommand(solutionDir, $"clean \"{solutionPath}\"", $"Clean {solutionName}");
         }
 
         private async Task HandleAddSolutionFolder(string solutionPath, string? targetFolder)
@@ -1003,6 +1037,14 @@ namespace SpanCoder.Shell
         private async Task RunDotnetCommand(string workingDir, string arguments, string taskName)
         {
             UpdateStatus($"{taskName} in progress...");
+
+            var shellWin = _ownerWindow as ShellWindow;
+            if (shellWin != null)
+            {
+                shellWin.FocusOutputTab("Build");
+                shellWin.AppendToOutput("Build", $"\n--- Starting {taskName} ---\n");
+            }
+
             try
             {
                 var psi = new System.Diagnostics.ProcessStartInfo
@@ -1019,8 +1061,22 @@ namespace SpanCoder.Shell
                 var process = new System.Diagnostics.Process { StartInfo = psi };
                 var outputBuilder = new System.Text.StringBuilder();
 
-                process.OutputDataReceived += (s, e) => { if (e.Data != null) outputBuilder.AppendLine(e.Data); };
-                process.ErrorDataReceived += (s, e) => { if (e.Data != null) outputBuilder.AppendLine(e.Data); };
+                process.OutputDataReceived += (s, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        outputBuilder.AppendLine(e.Data);
+                        shellWin?.AppendToOutput("Build", e.Data + "\n");
+                    }
+                };
+                process.ErrorDataReceived += (s, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        outputBuilder.AppendLine(e.Data);
+                        shellWin?.AppendToOutput("Build", e.Data + "\n");
+                    }
+                };
 
                 process.Start();
                 process.BeginOutputReadLine();
@@ -1028,33 +1084,21 @@ namespace SpanCoder.Shell
 
                 await process.WaitForExitAsync();
 
-                string fullOutput = outputBuilder.ToString();
                 if (process.ExitCode == 0)
                 {
                     UpdateStatus($"{taskName} succeeded.");
-                    if (_ownerWindow != null)
-                    {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() => 
-                            OutputDialog.Show(_ownerWindow, $"{taskName} Succeeded", fullOutput));
-                    }
+                    shellWin?.AppendToOutput("Build", $"\n[{taskName} Succeeded]\n");
                 }
                 else
                 {
                     UpdateStatus($"{taskName} failed with exit code {process.ExitCode}.");
-                    if (_ownerWindow != null)
-                    {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() => 
-                            OutputDialog.Show(_ownerWindow, $"{taskName} Failed", fullOutput));
-                    }
+                    shellWin?.AppendToOutput("Build", $"\n[{taskName} Failed with exit code {process.ExitCode}]\n");
                 }
             }
             catch (Exception ex)
             {
                 UpdateStatus($"{taskName} error: {ex.Message}");
-                if (_ownerWindow != null)
-                {
-                    OutputDialog.Show(_ownerWindow, $"{taskName} Error", ex.ToString());
-                }
+                shellWin?.AppendToOutput("Build", $"\n[Error executing {taskName}: {ex.Message}]\n");
             }
         }
 

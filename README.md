@@ -156,6 +156,36 @@ graph TD
 * **Live Installation Management**: Provides instant "Install" and "Uninstall" action buttons that load or terminate out-of-process extension daemons dynamically.
 * **Dynamic Configuration Bindings**: Parses registered extension settings automatically, rendering interactive checkboxes for boolean toggles and input textboxes for string settings. Configuration changes are synchronized and written to `%APPDATA%/SpanCoder/settings.json` in real-time.
 
+### 23. GitLens-style Inline Blame Annotations
+* **Real-Time Git Annotations**: Displays inline Git blame information (commit author, date, message) directly at the end of the active cursor line using faded, hardware-accelerated Skia text overlay brushes.
+
+### 24. ErrorLens Inline Diagnostics
+* **Inline Compiler Feedback**: Renders full compiler diagnostics description, warnings, and errors directly at the end of the problematic line, minimizing layout shifting and visual context switching.
+
+### 25. Focus Mode & Zen Workspace Layout
+* **Distraction-Free Workspace**: Instantly collapses side panels, the status bar, status indicators, and margin areas to maximize vertical and horizontal canvas code space for focused programming (`Ctrl+K, Z`).
+
+### 26. Visual Git Diff & Native PR Reviews
+* **Split Diff Viewport**: Side-by-side split Diff pane to review local Git changes, compare branch history, and walk through pull request code changes directly inside the editor tab.
+
+### 27. Interactive Keyboard Shortcuts & Searchable Settings
+* **Custom Remapper UI**: Filtered settings search bar and interactive key mapper that dynamically captures key combinations (including modifier keys) to customize IDE gestures. Offers built-in conflict alerts and persists customizations to `%APPDATA%/SpanCoder/keybindings.json` to overwrite default commands and plugin bindings at runtime.
+
+### 28. Extended Language Support (C/C++ & Java)
+* **Out-of-Process Syntax Highlight**: Registers keyword syntax coloring, lines/block comment configurations, and type sets for `.c`, `.cc`, `.h`, `.hpp`, and `.java` files out-of-process via the core languages extension.
+* **LSP Integration**: Dynamically routes and spawns `clangd` LSP for C/C++ files and `jdtls` LSP for Java files, providing code actions, completions, definitions, and compiler diagnostics.
+
+### 29. Microcontroller Serial & REPL Tooling (Thonny-style)
+* **Serial REPL Connection Manager**: Built-in interactive console pane at the bottom of the editor that connects to serial ports (COM/TTY). When connected, keys typed are sent over serial and responses from the board are printed to the terminal.
+* **Auto-Detection Probing**: Scans active ports, sends a query, and matches `>>>` to automatically detect a MicroPython/CircuitPython device.
+* **Interactive UF2 Flashing Dialog**: Search for bootloader-ready storage volumes (like `RPI-RP2` drives) and flashes target microcontrollers with specific MicroPython runtimes using a progress bar.
+* **Interruption Controls**: Toolbar buttons to easily send Ctrl+C (KeyboardInterrupt) or Ctrl+D (soft reboot) to control board execution.
+
+### 30. Hardware Firmware Deployments & Silicon Debugging
+* **Graphical Target Manager** (`HardwareDeployWindow.cs`): Visual board presets (RP2040/RP2350 Pico, STM32, ESP32), debugger probe selectors (CMSIS-DAP, J-Link, ST-Link, ESP-Prog), custom compilation/upload commands, and target remote connections saved directly to `spancoder_debug.json`.
+* **Integrated Background Runner**: Custom shell processes executing builds and upload commands in the background, redirecting stdout/stderr streams to the multi-channel Output pane in real-time.
+* **Microcontroller GDB DAP Debugger**: Automatically launches native ARM debuggers using `--interpreter=dap` flags, or falls back to a simulated Cortex-M mock silicon debugger providing stepping, local variables, and CPU register maps (`pc`, `sp`, `lr`, `r0-r3`) for testing without hardware.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions
@@ -376,29 +406,13 @@ Interactive debugging features are integrated into the main shell via several de
 
 ## Phased Improvement Roadmap
 
-### Phase 1: AI Copilot & Code Generation Integration
-* [x] **Out-of-Process LLM Connector**: Background agent host service to interface with local or cloud-based LLMs without blocking the primary editing loop.
-* [x] **Inline Ghost Text**: Support inline ghost-text code completions using zero-allocation overlay renderings.
-* [x] **AI Chat & Command Palette Actions**: Build a floating sidebar chat window and command palette shortcodes (e.g., `/explain`, `/refactor`, `/fix`) to interact directly with code snippets.
+### Phase 1: Remote Workspace SSH & Docker Tooling
+* [ ] **SSH Engine Connection Tunneling**: Seamless remote development environment hosting over SSH, mapping file system watchers and building/deploying remotely on Unix/Linux VMs.
+* [ ] **Docker Containers Workbench**: Compile, debug, and execute tests directly inside isolated local or remote Docker containers with automatic port-forwarding mappings.
 
-### Phase 2: Advanced Editing Features
-* [x] **Split Editor Layouts**: Support vertical and horizontal workspace splitting to edit multiple files or different views of the same file concurrently.
-* [x] **Vim Emulation Mode**: Implement a zero-dependency, out-of-process modal keyboard layout adapter.
-* [x] **Structural Code Folding**: Add folding support for classes, methods, and blocks, using background AST parsers.
-* [x] **Unsaved Changes Indicators & Dialogs**: Added document dirty state tracking, tab asterisk indicator, and custom modal close confirmation dialogs.
-* [x] **Context-Aware Right-Click Menu & Selection**: Added right-click context menu (Cut/Copy/Paste, Breakpoint, Go to Definition, etc.), custom extension item support, and double/triple click selection actions.
-
-### Phase 3: Remote Development & Collaboration
-* [x] **Remote Engine Host**: Allow `SpanCoder.App` to run locally while connecting to a remote `SpanCoder.Engine` daemon running on a Linux server or in a Docker DevContainer.
-* [x] **Real-Time Collaborative Coding**: Synchronize piece-table buffers between multiple developers using low-latency CRDT (Conflict-free Replicated Data Types) protocols over WebSockets.
-
-### Phase 4: Ecosystem & High-Value Extensions
-* [x] **GitLens-style Inline Blame**: Add real-time inline git blame annotations (rendered as faded ghost-text next to the active cursor line) built directly into the core editor canvas.
-* [x] **Prettier Formatter Extension** (`SpanCoder.Extensions.Prettier`): Support out-of-process formatting and asynchronous Format-on-Save by routing code buffers over secure TCP connections.
-* [x] **ErrorLens Inline Diagnostics**: Render full LSP compiler diagnostics descriptions directly at the end of the problematic line using Skia text overlays, built directly into the core editor canvas.
-* [x] **Focus Mode & Zen Workspace Layout**: Toggled workspace layout (`Ctrl+K, Z`) that collapses the side panels, status bar, and gutters for a distraction-free, code-first canvas.
-* [x] **Visual Git Diff & Native PR Code Reviews**: Side-by-side split Diff pane to review git modifications and pull requests directly inside the editor without context switching.
-* [ ] **Interactive Keyboard Shortcuts & Searchable Settings**: Real-time filtered settings search bar and interactive remapper UI to simplify setting updates for developers.
+### Phase 2: Rich Visual Profiler & Diagnostics
+* [ ] **Flame Graphs & Call Trees**: Real-time Skia-rendered flame graphs for CPU execution hot-paths and heap allocation profiling.
+* [ ] **Memory Dump Analysis**: Interactive heap explorer to navigate object hierarchies, GC roots, and memory leaks.
 
 ---
 

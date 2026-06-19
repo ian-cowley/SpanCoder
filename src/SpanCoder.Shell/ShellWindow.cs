@@ -65,6 +65,8 @@ namespace SpanCoder.Shell
         private GitVersionProvider _gitProvider = null!;
         private DispatcherTimer? _gitTimer;
         private PtyHost? _terminalPty;
+        private TerminalControl? _terminalControl;
+        private OutputControl? _outputControl;
 
         private IEngineConnection? _engine;
         private CollabServer? _collabServer;
@@ -237,6 +239,7 @@ namespace SpanCoder.Shell
             AddToolbarButton("Toggle Line Comment", "Edit.ToggleLineComment", "Toggle Line Comment (Ctrl+/)");
             AddToolbarButton("Toggle Block Comment", "Edit.ToggleBlockComment", "Toggle Block Comment (Ctrl+Shift+/)");
             AddToolbarButton("⚡ Hot Reload", "Build.HotReload", "Hot Reload Changes (F4)");
+            AddToolbarButton("🔌 Deploy & Debug", "Build.DeployToHardware", "Deploy to Microcontroller & Debug (F6)");
 
             // 2. Workspace Layout
             var workspaceGrid = new Grid();
@@ -1261,9 +1264,27 @@ namespace SpanCoder.Shell
             });
             terminalTabHeader.Children.Add(new TextBlock { Text = "Terminal", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
 
-            var terminalControl = new TerminalControl();
-            var terminalTab = new TabItem { Header = terminalTabHeader, Content = terminalControl };
+            _terminalControl = new TerminalControl();
+            var terminalTab = new TabItem { Header = terminalTabHeader, Content = _terminalControl };
             _bottomTabControl.Items.Add(terminalTab);
+
+            // Output Tab
+            var outputTabHeader = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2) };
+            outputTabHeader.Children.Add(new Avalonia.Controls.Shapes.Path
+            {
+                Width = 12,
+                Height = 12,
+                Data = StreamGeometry.Parse("M14,2 H6 C4.9,2 4,2.9 4,4 V20 C4,21.1 4.9,22 6,22 H18 C19.1,22 20,21.1 20,20 V8 L14,2 Z M16,18 H8 V16 H16 V18 Z M16,14 H8 V12 H16 V14 Z M13,9 V3.5 L18.5,9 H13 Z"),
+                Fill = new SolidColorBrush(Color.Parse("#29B6F6")),
+                Stretch = Stretch.Uniform,
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            outputTabHeader.Children.Add(new TextBlock { Text = "Output", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+
+            _outputControl = new OutputControl();
+            var outputTab = new TabItem { Header = outputTabHeader, Content = _outputControl };
+            _bottomTabControl.Items.Add(outputTab);
 
             var perfTabHeader = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2) };
             perfTabHeader.Children.Add(new Avalonia.Controls.Shapes.Path
@@ -1281,6 +1302,24 @@ namespace SpanCoder.Shell
             var perfControl = new PerformanceGraphsControl();
             var perfTab = new TabItem { Header = perfTabHeader, Content = perfControl };
             _bottomTabControl.Items.Add(perfTab);
+
+            // Serial REPL Tab
+            var serialTabHeader = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2) };
+            serialTabHeader.Children.Add(new Avalonia.Controls.Shapes.Path
+            {
+                Width = 12,
+                Height = 12,
+                Data = StreamGeometry.Parse("M9,9 H11 V11 H9 V9 Z M13,9 H15 V11 H13 V9 Z M17,9 H19 V11 H17 V9 Z M9,13 H11 V15 H9 V13 Z M13,13 H15 V15 H13 V13 Z M17,13 H19 V15 H17 V13 Z M21,5 H3 V19 H21 V5 Z M19,17 H5 V7 H19 V17 Z"),
+                Fill = new SolidColorBrush(Color.Parse("#FFB74D")),
+                Stretch = Stretch.Uniform,
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            serialTabHeader.Children.Add(new TextBlock { Text = "Serial REPL", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+
+            var serialControl = new SerialReplControl();
+            var serialTab = new TabItem { Header = serialTabHeader, Content = serialControl };
+            _bottomTabControl.Items.Add(serialTab);
 
             // Find Results Tab
             _findResultsPanel = new FindResultsPanel(this);
@@ -1312,7 +1351,7 @@ namespace SpanCoder.Shell
             string shellPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "powershell.exe" : "/bin/bash";
             if (_terminalPty.Start(shellPath, Array.Empty<string>(), workingDir, 80, 24))
             {
-                terminalControl.BindPty(_terminalPty);
+                _terminalControl.BindPty(_terminalPty);
             }
 
             workspaceGrid.Children.Add(_editorPaneGrid);
@@ -1431,27 +1470,12 @@ namespace SpanCoder.Shell
                 _fileTree.SetRootPath(defaultWorkspace);
             }
 
-            // Register key bindings for all core commands so they work even if menu bar is hidden
-            foreach (var cmd in GeneratedCommandRegistry.Commands)
+            // Register key bindings for all core commands
+            RebuildKeyBindings();
+            KeybindingsManager.KeybindingsChanged += () =>
             {
-                if (!string.IsNullOrEmpty(cmd.DefaultShortcut))
-                {
-                    try
-                    {
-                        var gesture = KeyGesture.Parse(cmd.DefaultShortcut);
-                        var binding = new KeyBinding
-                        {
-                            Gesture = gesture,
-                            Command = new ActionCommand(() => OnCommandInvoked(cmd.Id))
-                        };
-                        this.KeyBindings.Add(binding);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[ShellWindow] Failed to parse shortcut '{cmd.DefaultShortcut}' for command '{cmd.Id}': {ex.Message}");
-                    }
-                }
-            }
+                Avalonia.Threading.Dispatcher.UIThread.Post(RebuildKeyBindings);
+            };
 
             UpdateStatusBar();
             UpdateEditMenuState();
@@ -1889,24 +1913,7 @@ namespace SpanCoder.Shell
 
                 TrackExtensionUiElement(extensionId, currentItem);
 
-                if (!string.IsNullOrEmpty(shortcut))
-                {
-                    try
-                    {
-                        var gesture = KeyGesture.Parse(shortcut);
-                        var binding = new KeyBinding
-                        {
-                            Gesture = gesture,
-                            Command = new ActionCommand(() => OnCommandInvoked(commandId))
-                        };
-                        this.KeyBindings.Add(binding);
-                        TrackExtensionKeyBinding(extensionId, binding);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[ShellWindow] Failed to parse shortcut '{shortcut}' for command '{commandId}': {ex.Message}");
-                    }
-                }
+                RebuildKeyBindings();
             }
         }
 
@@ -2608,8 +2615,66 @@ namespace SpanCoder.Shell
 
         public void ShowSettings()
         {
-            var settingsWin = new SettingsWindow();
+            var settingsWin = new SettingsWindow(this);
             settingsWin.ShowDialog(this);
+        }
+
+        public IReadOnlyList<CommandDescriptor> ExtensionCommands => _extensionCommands;
+
+        public void RebuildKeyBindings()
+        {
+            this.KeyBindings.Clear();
+            _extensionKeyBindings.Clear();
+
+            // 1. Core commands
+            foreach (var cmd in GeneratedCommandRegistry.Commands)
+            {
+                string shortcut = KeybindingsManager.GetShortcut(cmd.Id, cmd.DefaultShortcut);
+                if (!string.IsNullOrEmpty(shortcut))
+                {
+                    try
+                    {
+                        var gesture = KeyGesture.Parse(KeybindingsManager.NormalizeShortcut(shortcut));
+                        var binding = new KeyBinding
+                        {
+                            Gesture = gesture,
+                            Command = new ActionCommand(() => OnCommandInvoked(cmd.Id))
+                        };
+                        this.KeyBindings.Add(binding);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ShellWindow] Failed to parse custom/default shortcut '{shortcut}' for command '{cmd.Id}': {ex.Message}");
+                    }
+                }
+            }
+
+            // 2. Extension commands
+            foreach (var cmd in _extensionCommands)
+            {
+                string shortcut = KeybindingsManager.GetShortcut(cmd.Id, cmd.DefaultShortcut);
+                if (!string.IsNullOrEmpty(shortcut))
+                {
+                    try
+                    {
+                        var gesture = KeyGesture.Parse(KeybindingsManager.NormalizeShortcut(shortcut));
+                        var binding = new KeyBinding
+                        {
+                            Gesture = gesture,
+                            Command = new ActionCommand(() => OnCommandInvoked(cmd.Id))
+                        };
+                        this.KeyBindings.Add(binding);
+                        if (_commandToExtensionMap.TryGetValue(cmd.Id, out var extId))
+                        {
+                            TrackExtensionKeyBinding(extId, binding);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ShellWindow] Failed to parse custom/default shortcut '{shortcut}' for command '{cmd.Id}': {ex.Message}");
+                    }
+                }
+            }
         }
 
         [Command("File.Exit", "Exit", "File", "Alt+F4")]
@@ -5509,6 +5574,7 @@ namespace SpanCoder.Shell
 
             _isRunningTests = true;
             _statusBar.Text = "Running Live Unit Tests...";
+            _outputControl?.AppendText("Tests", "\n--- Running Live Unit Tests ---\n");
 
             Task.Run(async () =>
             {
@@ -5521,14 +5587,31 @@ namespace SpanCoder.Shell
                         WorkingDirectory = WorkspaceRootPath,
                         UseShellExecute = false,
                         CreateNoWindow = true,
-                        RedirectStandardOutput = true
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
                     };
 
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    if (proc != null)
+                    using var proc = new System.Diagnostics.Process { StartInfo = psi };
+                    proc.OutputDataReceived += (s, e) =>
                     {
-                        await proc.WaitForExitAsync();
-                    }
+                        if (e.Data != null)
+                        {
+                            _outputControl?.AppendText("Tests", e.Data + "\n");
+                        }
+                    };
+                    proc.ErrorDataReceived += (s, e) =>
+                    {
+                        if (e.Data != null)
+                        {
+                            _outputControl?.AppendText("Tests", e.Data + "\n");
+                        }
+                    };
+
+                    proc.Start();
+                    proc.BeginOutputReadLine();
+                    proc.BeginErrorReadLine();
+
+                    await proc.WaitForExitAsync();
 
                     // Scan for the latest coverage.cobertura.xml
                     string testResultsDir = Path.Combine(WorkspaceRootPath, "TestResults");
@@ -5609,6 +5692,8 @@ namespace SpanCoder.Shell
                 return;
             }
 
+            FocusOutputTab("Build");
+            _outputControl?.AppendText("Build", "\n--- Hot Reload: Compiling workspace ---\n");
             _statusBar.Text = "Hot Reload: Compiling workspace...";
             
             Task.Run(async () =>
@@ -5622,35 +5707,206 @@ namespace SpanCoder.Shell
                         WorkingDirectory = WorkspaceRootPath,
                         UseShellExecute = false,
                         CreateNoWindow = true,
-                        RedirectStandardOutput = true
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
                     };
 
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    if (proc != null)
+                    using var proc = new System.Diagnostics.Process { StartInfo = psi };
+                    proc.OutputDataReceived += (s, e) =>
                     {
-                        await proc.WaitForExitAsync();
-                        if (proc.ExitCode == 0)
+                        if (e.Data != null)
                         {
-                            Dispatcher.UIThread.Post(() =>
-                            {
-                                _statusBar.Text = "⚡ Hot Reload applied: 4 methods updated.";
-                                RunLiveUnitTests();
-                            });
+                            _outputControl?.AppendText("Build", e.Data + "\n");
                         }
-                        else
+                    };
+                    proc.ErrorDataReceived += (s, e) =>
+                    {
+                        if (e.Data != null)
                         {
-                            Dispatcher.UIThread.Post(() =>
-                            {
-                                _statusBar.Text = "Hot Reload failed: Compilation error.";
-                            });
+                            _outputControl?.AppendText("Build", e.Data + "\n");
                         }
+                    };
+
+                    proc.Start();
+                    proc.BeginOutputReadLine();
+                    proc.BeginErrorReadLine();
+
+                    await proc.WaitForExitAsync();
+
+                    if (proc.ExitCode == 0)
+                    {
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            _outputControl?.AppendText("Build", "Hot Reload applied: compilation successful.\n");
+                            _statusBar.Text = "⚡ Hot Reload applied: 4 methods updated.";
+                            RunLiveUnitTests();
+                        });
+                    }
+                    else
+                    {
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            _outputControl?.AppendText("Build", "Hot Reload failed: compilation errors.\n");
+                            _statusBar.Text = "Hot Reload failed: Compilation error.";
+                        });
                     }
                 }
                 catch (Exception ex)
                 {
                     Dispatcher.UIThread.Post(() =>
                     {
+                        _outputControl?.AppendText("Build", $"Error during compilation: {ex.Message}\n");
                         _statusBar.Text = $"Hot Reload failed: {ex.Message}";
+                    });
+                }
+            });
+        }
+
+        [Command("Build.DeployToHardware", "Deploy to Hardware", "Build", "F6")]
+        [MenuItem("Build.DeployToHardware", "Build/Deploy to Hardware", 50)]
+        public static void DeployToHardwareCommand(ShellWindow window)
+        {
+            window.RunHardwareDeployment();
+        }
+
+        [Command("Tools.HardwareConfig", "Hardware Debug Configuration", "Tools", "Ctrl+Shift+D")]
+        [MenuItem("Tools.HardwareConfig", "Tools/Hardware Debug Configuration", 100)]
+        public static void HardwareConfigCommand(ShellWindow window)
+        {
+            var dialog = new HardwareDeployWindow(window);
+            dialog.ShowDialog(window);
+        }
+
+        public void RunHardwareDeployment()
+        {
+            if (string.IsNullOrEmpty(WorkspaceRootPath))
+            {
+                _statusBar.Text = "Deploy failed: No active workspace folder.";
+                return;
+            }
+
+            string configPath = Path.Combine(WorkspaceRootPath, "spancoder_debug.json");
+            string? deployCmd = null;
+
+            if (File.Exists(configPath))
+            {
+                try
+                {
+                    string json = File.ReadAllText(configPath);
+                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("deployCmd", out var deployProp))
+                    {
+                        deployCmd = deployProp.GetString() ?? "";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ShellWindow] Error reading deployCmd: {ex.Message}");
+                }
+            }
+
+            if (string.IsNullOrEmpty(deployCmd))
+            {
+                var dialog = new HardwareDeployWindow(this);
+                dialog.ShowDialog(this);
+                return;
+            }
+
+            RunHardwareDeploymentCommand(deployCmd);
+        }
+
+        public void FocusOutputTab(string channel)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_bottomTabControl == null || _outputControl == null) return;
+
+                foreach (var itemObj in _bottomTabControl.Items)
+                {
+                    if (itemObj is TabItem item && item.Header is StackPanel sp)
+                    {
+                        if (sp.Children.OfType<TextBlock>().Any(tb => tb.Text == "Output"))
+                        {
+                            _bottomTabControl.SelectedItem = item;
+                            break;
+                        }
+                    }
+                }
+
+                _outputControl.SelectChannel(channel);
+            });
+        }
+
+        public void AppendToOutput(string channel, string text)
+        {
+            _outputControl?.AppendText(channel, text);
+        }
+
+        public void RunHardwareDeploymentCommand(string deployCmd)
+        {
+            if (string.IsNullOrEmpty(WorkspaceRootPath) || _outputControl == null) return;
+
+            FocusOutputTab("Deploy");
+            _outputControl.AppendText("Deploy", $"\n> Executing deployment: {deployCmd}\n");
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "cmd.exe",
+                        Arguments = $"/c \"{deployCmd}\"",
+                        WorkingDirectory = WorkspaceRootPath,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+
+                    using var proc = new System.Diagnostics.Process { StartInfo = psi };
+                    proc.OutputDataReceived += (s, e) =>
+                    {
+                        if (e.Data != null)
+                        {
+                            _outputControl.AppendText("Deploy", e.Data + "\n");
+                        }
+                    };
+                    proc.ErrorDataReceived += (s, e) =>
+                    {
+                        if (e.Data != null)
+                        {
+                            _outputControl.AppendText("Deploy", e.Data + "\n");
+                        }
+                    };
+
+                    proc.Start();
+                    proc.BeginOutputReadLine();
+                    proc.BeginErrorReadLine();
+
+                    await proc.WaitForExitAsync();
+
+                    int exitCode = proc.ExitCode;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        _outputControl.AppendText("Deploy", $"\n[Deployment Finished with exit code {exitCode}]\n");
+                        if (exitCode == 0)
+                        {
+                            _statusBar.Text = "Deployment succeeded. Starting debugger...";
+                            StartDebugging();
+                        }
+                        else
+                        {
+                            _statusBar.Text = $"Deployment failed with exit code {exitCode}.";
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        _outputControl?.AppendText("Deploy", $"\n[Deployment Error: {ex.Message}]\n");
+                        _statusBar.Text = "Deployment failed.";
                     });
                 }
             });

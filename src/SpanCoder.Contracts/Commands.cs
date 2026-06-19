@@ -115,6 +115,7 @@ namespace SpanCoder.Contracts
         event Action<string> ExtensionUnregistered;
         event Action<string, string, string, string, string>? StatusBarItemUpdated;
         void ExecuteCommand(string extensionId, string commandId);
+        void ExecuteCommandWithContext(string extensionId, string commandId, string activeFilePath, string activeContent);
         void AddPendingToken(string token, string extensionId);
         System.Threading.Tasks.Task<string?> FormatDocumentAsync(string extensionId, int documentId, string filePath, string content);
         void UninstallPlugin(string extensionId);

@@ -622,5 +622,82 @@ namespace SpanCoder.Tests
                 }
             }
         }
+
+        [Fact]
+        public async Task TestRealExtensionsCommunication()
+        {
+            string tempPluginsDir = Path.Combine(Path.GetTempPath(), "SpanCoderTests_Plugins_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempPluginsDir);
+
+            try
+            {
+                using var manager = new ExtensionManager(tempPluginsDir);
+                bool registered = false;
+                manager.ExtensionRegistered += (extId, manifest) => { registered = true; };
+
+                manager.Start();
+                int port = manager.Port;
+
+                using var client = new TcpClient();
+                await client.ConnectAsync("127.0.0.1", port);
+                using var stream = client.GetStream();
+
+                string manifestJson = "{\"id\":\"html-preview\",\"commands\":[{\"id\":\"html-preview.show\",\"displayName\":\"Show HTML\"}]}";
+                string token = "test-token-html";
+                manager.AddPendingToken(token, "html-preview");
+
+                byte[] jsonBytes = Encoding.UTF8.GetBytes(manifestJson);
+                byte[] regBuffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
+                int regLen = BinaryMessageSerializer.WriteRegisterExtension(regBuffer, token, jsonBytes);
+
+                await stream.WriteAsync(regBuffer, 0, regLen);
+                await stream.FlushAsync();
+
+                // Wait for registration
+                for (int i = 0; i < 20 && !registered; i++)
+                {
+                    await Task.Delay(50);
+                }
+                Assert.True(registered);
+
+                // Now execute command with context
+                var clientLoopTask = Task.Run< (string? cmdId, string? path, string? content) >(async () =>
+                {
+                    byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
+                    int r = await ReadExactlyAsync(stream, headerBuffer, 0, headerBuffer.Length);
+                    if (r <= 0) return (null, null, null);
+
+                    if (!BinaryMessageSerializer.TryParseHeader(headerBuffer, out var header)) return (null, null, null);
+
+                    byte[] payload = new byte[header.Length];
+                    Array.Copy(headerBuffer, 0, payload, 0, headerBuffer.Length);
+                    if (header.Length > headerBuffer.Length)
+                    {
+                        await ReadExactlyAsync(stream, payload, headerBuffer.Length, header.Length - headerBuffer.Length);
+                    }
+
+                    if (header.Type == MessageTypes.ExecuteExtensionCommandWithContext)
+                    {
+                        BinaryMessageSerializer.ParseExecuteExtensionCommandWithContext(payload, out string cmdId, out string path, out string content);
+                        return (cmdId, path, content);
+                    }
+                    return (null, null, null);
+                });
+
+                manager.ExecuteCommandWithContext("html-preview", "html-preview.show", "c:/temp/test.html", "<h1>Hello</h1>");
+
+                var (cmdId, path, content) = await clientLoopTask;
+                Assert.Equal("html-preview.show", cmdId);
+                Assert.Equal("c:/temp/test.html", path);
+                Assert.Equal("<h1>Hello</h1>", content);
+            }
+            finally
+            {
+                if (Directory.Exists(tempPluginsDir))
+                {
+                    Directory.Delete(tempPluginsDir, true);
+                }
+            }
+        }
     }
 }

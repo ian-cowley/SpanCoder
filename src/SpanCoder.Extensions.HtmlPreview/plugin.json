@@ -1,0 +1,34 @@
+{
+  "id": "html-preview",
+  "displayName": "HTML Previewer Extension",
+  "version": "1.0.0",
+  "entryPoint": "SpanCoder.Extensions.HtmlPreview.dll",
+  "commands": [
+    {
+      "id": "html-preview.show",
+      "displayName": "Show HTML Preview",
+      "category": "View",
+      "defaultShortcut": "Ctrl+Shift+H"
+    }
+  ],
+  "menuItems": [
+    {
+      "commandId": "html-preview.show",
+      "menuPath": "View/Show HTML Preview",
+      "orderPriority": 50
+    }
+  ],
+  "panels": [
+    {
+      "id": "html-preview-panel",
+      "title": "HTML Preview"
+    }
+  ],
+  "toolbarItems": [
+    {
+      "commandId": "html-preview.show",
+      "displayName": "HTML Preview",
+      "orderPriority": 200
+    }
+  ]
+}

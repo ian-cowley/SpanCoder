@@ -808,9 +808,12 @@ namespace SpanCoder.Shell
 
                 btnAction.Click += (s, e) =>
                 {
+                    var pluginsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins", item.Id);
+                    bool hasRealPlugin = System.IO.Directory.Exists(pluginsDir);
+
                     if (item.IsInstalled)
                     {
-                        if (item.Id == "prettier-extension" || item.Id == "languages-extension")
+                        if (hasRealPlugin)
                         {
                             if (_extensionManager != null)
                             {
@@ -830,19 +833,10 @@ namespace SpanCoder.Shell
                     }
                     else
                     {
-                        if (item.Id == "prettier-extension" || item.Id == "languages-extension")
+                        if (hasRealPlugin && _extensionManager != null)
                         {
-                            var pluginsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins", item.Id);
-                            if (System.IO.Directory.Exists(pluginsDir) && _extensionManager != null)
-                            {
-                                _extensionManager.InstallAndLaunchPlugin(pluginsDir);
-                                item.IsInstalled = true;
-                            }
-                            else
-                            {
-                                StartMockExtension(item.Id, item.ManifestJson);
-                                item.IsInstalled = true;
-                            }
+                            _extensionManager.InstallAndLaunchPlugin(pluginsDir);
+                            item.IsInstalled = true;
                         }
                         else
                         {
@@ -1987,7 +1981,20 @@ namespace SpanCoder.Shell
 
             if (_commandToExtensionMap.TryGetValue(commandId, out var extId) && _extensionManager != null)
             {
-                _extensionManager.ExecuteCommand(extId, commandId);
+                if (extId == "html-preview" || extId == "python-lang")
+                {
+                    string activeFilePath = _activeDocument?.FilePath ?? "";
+                    string activeContent = "";
+                    if (_activeDocument != null && _activeDocument.Document != null)
+                    {
+                        activeContent = GetDocumentText(_activeDocument.Document);
+                    }
+                    _extensionManager.ExecuteCommandWithContext(extId, commandId, activeFilePath, activeContent);
+                }
+                else
+                {
+                    _extensionManager.ExecuteCommand(extId, commandId);
+                }
             }
         }
 
@@ -4472,9 +4479,12 @@ namespace SpanCoder.Shell
             };
             btnAction.Click += (s, e) =>
             {
+                var pluginsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins", item.Id);
+                bool hasRealPlugin = System.IO.Directory.Exists(pluginsDir);
+
                 if (item.IsInstalled)
                 {
-                    if (item.Id == "prettier-extension" || item.Id == "languages-extension")
+                    if (hasRealPlugin)
                     {
                         if (_extensionManager != null)
                         {
@@ -4494,19 +4504,10 @@ namespace SpanCoder.Shell
                 }
                 else
                 {
-                    if (item.Id == "prettier-extension" || item.Id == "languages-extension")
+                    if (hasRealPlugin && _extensionManager != null)
                     {
-                        var pluginsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins", item.Id);
-                        if (System.IO.Directory.Exists(pluginsDir) && _extensionManager != null)
-                        {
-                            _extensionManager.InstallAndLaunchPlugin(pluginsDir);
-                            item.IsInstalled = true;
-                        }
-                        else
-                        {
-                            StartMockExtension(item.Id, item.ManifestJson);
-                            item.IsInstalled = true;
-                        }
+                        _extensionManager.InstallAndLaunchPlugin(pluginsDir);
+                        item.IsInstalled = true;
                     }
                     else
                     {

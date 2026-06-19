@@ -1,0 +1,45 @@
+{
+  "id": "python-lang",
+  "displayName": "Python Support Extension",
+  "version": "1.0.0",
+  "entryPoint": "SpanCoder.Extensions.Python.dll",
+  "commands": [
+    {
+      "id": "python.run",
+      "displayName": "Run Python Script",
+      "category": "Tools",
+      "defaultShortcut": "Ctrl+F5"
+    }
+  ],
+  "menuItems": [
+    {
+      "commandId": "python.run",
+      "menuPath": "Tools/Run Python Script",
+      "orderPriority": 60
+    }
+  ],
+  "toolbarItems": [
+    {
+      "commandId": "python.run",
+      "displayName": "Run Python",
+      "orderPriority": 210
+    }
+  ],
+  "languages": [
+    {
+      "extension": ".py",
+      "lineComment": "#",
+      "keywords": ["def", "class", "import", "from", "if", "elif", "else", "while", "for", "in", "return", "print"],
+      "types": ["int", "str", "list", "dict", "object"]
+    }
+  ],
+  "statusBarItems": [
+    {
+      "id": "python-status",
+      "text": "Python: Idle",
+      "tooltip": "Python extension is ready",
+      "alignment": 1,
+      "orderPriority": 210
+    }
+  ]
+}

@@ -370,6 +370,35 @@ namespace SpanCoder.App
             }
         }
 
+        public void ExecuteCommandWithContext(string extensionId, string commandId, string activeFilePath, string activeContent)
+        {
+            if (_activeExtensions.TryGetValue(extensionId, out var ext))
+            {
+                int sizeNeeded = BinaryMessageSerializer.HeaderSize + 4 + commandId.Length * sizeof(char) + 4 + activeFilePath.Length * sizeof(char) + 4 + activeContent.Length * sizeof(char);
+                byte[] temp = new byte[sizeNeeded];
+                int len = BinaryMessageSerializer.WriteExecuteExtensionCommandWithContext(temp, commandId, activeFilePath, activeContent);
+                byte[] payload = new byte[len];
+                Array.Copy(temp, 0, payload, 0, len);
+
+                lock (ext.WriteLock)
+                {
+                    try
+                    {
+                        ext.Stream.Write(payload, 0, len);
+                        ext.Stream.Flush();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ExtensionManager] Failed to dispatch command '{commandId}' with context to extension '{extensionId}': {ex.Message}");
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[ExtensionManager] Cannot execute command '{commandId}' with context: Extension '{extensionId}' is not connected.");
+            }
+        }
+
         public async Task<string?> FormatDocumentAsync(string extensionId, int documentId, string filePath, string content)
         {
             if (!_activeExtensions.TryGetValue(extensionId, out var ext))

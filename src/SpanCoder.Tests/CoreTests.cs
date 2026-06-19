@@ -4,6 +4,7 @@ using Xunit;
 using SpanCoder.Contracts;
 using SpanCoder.Engine;
 using SpanCoder.Shell;
+using Avalonia.Headless.XUnit;
 
 namespace SpanCoder.Tests
 {
@@ -241,8 +242,8 @@ namespace SpanCoder.Tests
             }
         }
 
-        [Fact]
-        public void TestIpcEngineConnectionRecovery()
+        [AvaloniaFact]
+        public async Task TestIpcEngineConnectionRecovery()
         {
             using var connection = new SpanCoder.App.IpcEngineConnection();
             connection.Start();
@@ -275,7 +276,7 @@ namespace SpanCoder.Tests
                 int retries = 0;
                 while (!receivedLoadResponse && retries++ < 50)
                 {
-                    System.Threading.Thread.Sleep(100);
+                    await Task.Delay(100);
                 }
                 Assert.True(receivedLoadResponse, "Load file response not received");
                 Assert.True(finalDocId > 0);
@@ -289,7 +290,7 @@ namespace SpanCoder.Tests
                 retries = 0;
                 while (!receivedLoadResponse && retries++ < 50)
                 {
-                    System.Threading.Thread.Sleep(100);
+                    await Task.Delay(100);
                 }
                 Assert.True(receivedLoadResponse, "Insert response not received");
 
@@ -298,7 +299,7 @@ namespace SpanCoder.Tests
                 while (doc == null && retries++ < 50)
                 {
                     doc = connection.GetDocument(finalDocId) as Document;
-                    if (doc == null) System.Threading.Thread.Sleep(50);
+                    if (doc == null) await Task.Delay(50);
                 }
                 Assert.NotNull(doc);
                 char[] textBuf = new char[doc.Length];
@@ -313,7 +314,7 @@ namespace SpanCoder.Tests
                 retries = 0;
                 while (!receivedLoadResponse && retries++ < 80)
                 {
-                    System.Threading.Thread.Sleep(100);
+                    await Task.Delay(100);
                 }
                 Assert.True(receivedLoadResponse, "Reconnection load response not received after crash");
 
@@ -322,7 +323,7 @@ namespace SpanCoder.Tests
                 while (docAfter == null && retries++ < 50)
                 {
                     docAfter = connection.GetDocument(finalDocId) as Document;
-                    if (docAfter == null) System.Threading.Thread.Sleep(50);
+                    if (docAfter == null) await Task.Delay(50);
                 }
                 Assert.NotNull(docAfter);
 

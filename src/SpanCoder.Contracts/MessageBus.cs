@@ -49,6 +49,7 @@ namespace SpanCoder.Contracts
         public const byte ExtensionSettingChanged = 42;
         public const byte FormatDocumentRequest = 43;
         public const byte FormatDocumentResponse = 44;
+        public const byte ExecuteExtensionCommandWithContext = 45;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -1843,6 +1844,85 @@ namespace SpanCoder.Contracts
             }
 
             return "";
+        }
+
+        public static int WriteExecuteExtensionCommandWithContext(Span<byte> buffer, ReadOnlySpan<char> commandId, ReadOnlySpan<char> activeFilePath, ReadOnlySpan<char> activeContent)
+        {
+            int cmdBytesCount = commandId.Length * sizeof(char);
+            int pathBytesCount = activeFilePath.Length * sizeof(char);
+            int contentBytesCount = activeContent.Length * sizeof(char);
+
+            int totalLength = HeaderSize + sizeof(int) + cmdBytesCount + sizeof(int) + pathBytesCount + sizeof(int) + contentBytesCount;
+            if (buffer.Length < totalLength)
+                throw new ArgumentException("Buffer too small", nameof(buffer));
+
+            WriteHeader(buffer, MessageTypes.ExecuteExtensionCommandWithContext, totalLength, 0, 0);
+            int writeOffset = HeaderSize;
+
+            int cmdLen = commandId.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in cmdLen);
+            writeOffset += sizeof(int);
+            if (cmdLen > 0)
+            {
+                ReadOnlySpan<byte> cmdBytes = MemoryMarshal.AsBytes(commandId);
+                cmdBytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += cmdBytesCount;
+            }
+
+            int pathLen = activeFilePath.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in pathLen);
+            writeOffset += sizeof(int);
+            if (pathLen > 0)
+            {
+                ReadOnlySpan<byte> pathBytes = MemoryMarshal.AsBytes(activeFilePath);
+                pathBytes.CopyTo(buffer.Slice(writeOffset));
+                writeOffset += pathBytesCount;
+            }
+
+            int contentLen = activeContent.Length;
+            MemoryMarshal.Write(buffer.Slice(writeOffset, sizeof(int)), in contentLen);
+            writeOffset += sizeof(int);
+            if (contentLen > 0)
+            {
+                ReadOnlySpan<byte> contentBytes = MemoryMarshal.AsBytes(activeContent);
+                contentBytes.CopyTo(buffer.Slice(writeOffset));
+            }
+
+            return totalLength;
+        }
+
+        public static void ParseExecuteExtensionCommandWithContext(ReadOnlySpan<byte> messageBuffer, out string commandId, out string activeFilePath, out string activeContent)
+        {
+            int readOffset = HeaderSize;
+
+            int cmdLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            commandId = "";
+            if (cmdLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, cmdLen * sizeof(char));
+                commandId = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += cmdLen * sizeof(char);
+            }
+
+            int pathLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            activeFilePath = "";
+            if (pathLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, pathLen * sizeof(char));
+                activeFilePath = new string(MemoryMarshal.Cast<byte, char>(bytes));
+                readOffset += pathLen * sizeof(char);
+            }
+
+            int contentLen = MemoryMarshal.Read<int>(messageBuffer.Slice(readOffset, sizeof(int)));
+            readOffset += sizeof(int);
+            activeContent = "";
+            if (contentLen > 0)
+            {
+                ReadOnlySpan<byte> bytes = messageBuffer.Slice(readOffset, contentLen * sizeof(char));
+                activeContent = new string(MemoryMarshal.Cast<byte, char>(bytes));
+            }
         }
     }
 }

@@ -99,9 +99,9 @@ graph TD
 * **Theme & Custom Settings** (`SettingsWindow.cs`, `SettingsManager.cs`): Modal options dialog (`Ctrl+,` or `Tools -> Options`) permitting changes to theme, typography, line height, and editor behavior.
 * **Extension Configuration Registration**: Extensions dynamically register custom configuration schemas via JSON manifests, allowing developers to configure third-party plugins in a unified interface. Settings persist locally in `%APPDATA%/SpanCoder/settings.json`.
 
-### 12. Real-Time Resource Diagnostics Graphs
+### 12. Real-Time Resource Diagnostics & Memory Profiler
 * **Rolling Performance Profiler** (`PerformanceGraphsControl.cs`): Renders dynamic CPU utilization (%) and Working Set RAM consumption (MB) line charts using custom Skia brushes with beautiful neon gradients.
-* **Bottom Panel Integration**: Integrates a dedicated "Performance" diagnostic tab right next to the embedded Terminal pane.
+* **Visual Diagnostics**: Dedicated "Performance" tab in the bottom panel for profiling code hot-paths, execution trees, and heap/GC allocations in real-time.
 
 ### 13. Headless UI Scenario Testing Suite
 * **Simulated User Interactions** (`UiTests.cs`): Uses `Avalonia.Headless.XUnit` to bootstrap the editor shell in a headless environment, asserting viewport coordinates, command palette inputs, settings applications, and tree navigation rendering.
@@ -201,8 +201,9 @@ graph TD
 ### 35. Context-Aware Right-Click Menu & Selection
 * **Context-Driven Actions**: Custom right-click context menu in the editor canvas providing Cut/Copy/Paste, Breakpoint toggles, Go to Definition, Find References, and Rename. Supports custom menu items registered dynamically by out-of-process extensions, alongside double/triple-click text selection.
 
-### 36. Remote Development Engine Host
-* **Decoupled Remote Hosting**: Run the `SpanCoder.App` shell locally while connecting to a remote `SpanCoder.Engine` daemon over TCP sockets. Includes configurable path mapping (`--map-path`) to resolve workspace directories between different operating systems.
+### 36. Remote Development Engine Host & SSH Tunneling
+* **Decoupled Remote Hosting**: Run the `SpanCoder.App` shell locally while connecting to a remote `SpanCoder.Engine` daemon over TCP sockets. Supports secure SSH port-forwarding tunnels, mapping file system watchers, and building/deploying remotely on Unix/Linux VMs.
+* **Path Mapping**: Includes configurable path mapping (`--map-path`) to resolve workspace directories between different operating systems (such as Windows to WSL/Linux).
 
 ### 37. Real-Time Collaborative Coding
 * **Low-Latency Sequence CRDT**: Syncs editor buffers between developers using a low-latency Conflict-free Replicated Data Type (CRDT) protocol over WebSockets. Displays remote cursor positions, selections, and user labels in real-time.
@@ -422,20 +423,9 @@ Interactive debugging features are integrated into the main shell via several de
 4. **Inline Diagnostics & Hover Inspection**:
    * During stopped states, hovering the mouse cursor over a variable queries DAP for its current evaluation and displays the value inline as a premium dark-themed tooltip.
    * Execution indicators show the active instruction pointer using a highlighted background line and an arrow icon.
-
 ---
 
-## Phased Improvement Roadmap
 
-### Phase 1: Remote Workspace SSH & Docker Tooling
-* [ ] **SSH Engine Connection Tunneling**: Seamless remote development environment hosting over SSH, mapping file system watchers and building/deploying remotely on Unix/Linux VMs.
-* [ ] **Docker Containers Workbench**: Compile, debug, and execute tests directly inside isolated local or remote Docker containers with automatic port-forwarding mappings.
-
-### Phase 2: Rich Visual Profiler & Diagnostics
-* [ ] **Flame Graphs & Call Trees**: Real-time Skia-rendered flame graphs for CPU execution hot-paths and heap allocation profiling.
-* [ ] **Memory Dump Analysis**: Interactive heap explorer to navigate object hierarchies, GC roots, and memory leaks.
-
----
 
 ## Build, Run, and Test Instructions
 

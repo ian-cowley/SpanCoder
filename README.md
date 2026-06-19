@@ -186,6 +186,27 @@ graph TD
 * **Integrated Background Runner**: Custom shell processes executing builds and upload commands in the background, redirecting stdout/stderr streams to the multi-channel Output pane in real-time.
 * **Microcontroller GDB DAP Debugger**: Automatically launches native ARM debuggers using `--interpreter=dap` flags, or falls back to a simulated Cortex-M mock silicon debugger providing stepping, local variables, and CPU register maps (`pc`, `sp`, `lr`, `r0-r3`) for testing without hardware.
 
+### 31. Out-of-Process LLM Connector
+* **Non-Blocking Background Service**: Decoupled LLM integration hosted in the background `SpanCoder.Engine` service, interfacing with local (Ollama) or cloud-based (Gemini, OpenAI) models without blocking the primary Avalonia UI thread.
+
+### 32. AI Chat Sidebar & Actions
+* **Embedded AI Chat Panel** (`AiChatPanel.cs`): Interactive sidebar supporting rich Markdown rendering, encrypted credentials storage, and auto-collapsing tool cards. Renders tool executions (e.g. running scripts, file editing) in real-time.
+
+### 33. Vim Emulation Mode
+* **Modal Keyboard Layouts**: Zero-dependency keyboard layout adapter providing Vim-style Normal and Insert modes. Supports navigation (`h`, `j`, `k`, `l`, `w`, `b`), edit actions (`x`, `dd`, `o`), and state transitions toggled via user settings.
+
+### 34. Unsaved Changes Indicators & Dialogs
+* **Buffer State Tracking**: Tracks unsaved edits on document buffers (`IsDirty`), appending asterisk markers (`*`) to editor tab titles. Warns developers with modal confirmation dialogs when closing unsaved files or exiting the IDE.
+
+### 35. Context-Aware Right-Click Menu & Selection
+* **Context-Driven Actions**: Custom right-click context menu in the editor canvas providing Cut/Copy/Paste, Breakpoint toggles, Go to Definition, Find References, and Rename. Supports custom menu items registered dynamically by out-of-process extensions, alongside double/triple-click text selection.
+
+### 36. Remote Development Engine Host
+* **Decoupled Remote Hosting**: Run the `SpanCoder.App` shell locally while connecting to a remote `SpanCoder.Engine` daemon over TCP sockets. Includes configurable path mapping (`--map-path`) to resolve workspace directories between different operating systems.
+
+### 37. Real-Time Collaborative Coding
+* **Low-Latency Sequence CRDT**: Syncs editor buffers between developers using a low-latency Conflict-free Replicated Data Type (CRDT) protocol over WebSockets. Displays remote cursor positions, selections, and user labels in real-time.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions

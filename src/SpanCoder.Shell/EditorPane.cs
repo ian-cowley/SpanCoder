@@ -25,6 +25,7 @@ namespace SpanCoder.Shell
         public Grid VScrollContainer { get; }
         public Border SplitHandle { get; }
         public Grid HScrollContainer { get; }
+        public Grid VSplitContainer { get; }
         public Border VSplitHandle { get; }
         public List<OpenDocument> OpenDocuments { get; } = new();
         public OpenDocument? ActiveDocument { get; set; }
@@ -72,10 +73,8 @@ namespace SpanCoder.Shell
                 Margin = new Thickness(0, 0, 4, 0)
             };
 
-            var btnSplitV = CreateActionButton("|", "Split Vertically", () => _window.SplitActivePane(false));
             var btnClose = CreateActionButton("✕", "Close Pane", () => _window.UnsplitPane(this));
 
-            actionsPanel.Children.Add(btnSplitV);
             actionsPanel.Children.Add(btnClose);
             tabGrid.Children.Add(actionsPanel);
             Grid.SetColumn(actionsPanel, 1);
@@ -85,9 +84,10 @@ namespace SpanCoder.Shell
 
             // Create Editor Grid Area
             EditorGrid = new Grid();
-            EditorGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Canvas
-            EditorGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Scrollbar V
-            EditorGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Canvas / Scrollbar V
+            EditorGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Col 0: VSplitContainer (vertical split handle)
+            EditorGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Col 1: Canvas
+            EditorGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Col 2: Scrollbar V
+            EditorGrid.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Canvas / Scrollbar V / VSplit
             EditorGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Scrollbar H
 
             Canvas = new TextEditorCanvas();
@@ -95,7 +95,7 @@ namespace SpanCoder.Shell
             Canvas.LayoutChanged += UpdateScrollbars;
             EditorGrid.Children.Add(Canvas);
             Grid.SetRow(Canvas, 0);
-            Grid.SetColumn(Canvas, 0);
+            Grid.SetColumn(Canvas, 1);
 
             VScrollContainer = new Grid();
             VScrollContainer.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Row 0: Split handle
@@ -130,12 +130,38 @@ namespace SpanCoder.Shell
 
             EditorGrid.Children.Add(VScrollContainer);
             Grid.SetRow(VScrollContainer, 0);
-            Grid.SetColumn(VScrollContainer, 1);
+            Grid.SetColumn(VScrollContainer, 2);
 
-            // Set up HScrollContainer and VSplitHandle (vertical split handle)
+            // Set up VSplitContainer and VSplitHandle (vertical split handle on the top-left)
+            VSplitContainer = new Grid();
+            VSplitContainer.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Row 0: VSplitHandle
+            VSplitContainer.RowDefinitions.Add(new RowDefinition(GridLength.Star)); // Row 1: Spacer
+
+            VSplitHandle = new Border
+            {
+                Width = 8,
+                Height = 16,
+                Background = new SolidColorBrush(Color.Parse("#3E3E40")),
+                BorderBrush = new SolidColorBrush(Color.Parse("#252525")),
+                BorderThickness = new Thickness(0, 0, 1, 1),
+                Cursor = new Cursor(StandardCursorType.SizeWestEast),
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            ToolTip.SetTip(VSplitHandle, "Drag right to split editor vertically");
+
+            // Micro-interactions for hover effect
+            VSplitHandle.PointerEntered += (s, e) => VSplitHandle.Background = new SolidColorBrush(Color.Parse("#505052"));
+            VSplitHandle.PointerExited += (s, e) => VSplitHandle.Background = new SolidColorBrush(Color.Parse("#3E3E40"));
+
+            VSplitContainer.Children.Add(VSplitHandle);
+            Grid.SetRow(VSplitHandle, 0);
+
+            EditorGrid.Children.Add(VSplitContainer);
+            Grid.SetRow(VSplitContainer, 0);
+            Grid.SetColumn(VSplitContainer, 0);
+
+            // Set up HScrollContainer (horizontal scrollbar container)
             HScrollContainer = new Grid();
-            HScrollContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Column 0: HScroll
-            HScrollContainer.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Column 1: VSplitHandle
 
             HScroll = new ScrollBar
             {
@@ -143,30 +169,11 @@ namespace SpanCoder.Shell
                 Height = 16
             };
 
-            VSplitHandle = new Border
-            {
-                Width = 8,
-                Background = new SolidColorBrush(Color.Parse("#3E3E40")),
-                BorderBrush = new SolidColorBrush(Color.Parse("#252525")),
-                BorderThickness = new Thickness(1, 0, 0, 0),
-                Cursor = new Cursor(StandardCursorType.SizeWestEast),
-                VerticalAlignment = VerticalAlignment.Stretch
-            };
-            ToolTip.SetTip(VSplitHandle, "Drag left to split editor vertically");
-
-            // Micro-interactions for hover effect
-            VSplitHandle.PointerEntered += (s, e) => VSplitHandle.Background = new SolidColorBrush(Color.Parse("#505052"));
-            VSplitHandle.PointerExited += (s, e) => VSplitHandle.Background = new SolidColorBrush(Color.Parse("#3E3E40"));
-
             HScrollContainer.Children.Add(HScroll);
-            Grid.SetColumn(HScroll, 0);
-
-            HScrollContainer.Children.Add(VSplitHandle);
-            Grid.SetColumn(VSplitHandle, 1);
 
             EditorGrid.Children.Add(HScrollContainer);
             Grid.SetRow(HScrollContainer, 1);
-            Grid.SetColumn(HScrollContainer, 0);
+            Grid.SetColumn(HScrollContainer, 1);
 
             // Wiring dragging for horizontal split (SplitHandle)
             Border? dragPreviewH = null;
@@ -451,12 +458,14 @@ namespace SpanCoder.Shell
                 Canvas.IsVisible = false;
                 VScrollContainer.IsVisible = false;
                 HScrollContainer.IsVisible = false;
+                VSplitContainer.IsVisible = false;
 
                 // Remove existing Custom views if any
                 var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
                     c != Canvas && 
                     c != VScrollContainer && 
                     c != HScrollContainer && 
+                    c != VSplitContainer && 
                     !(c is FindReplaceOverlay) && 
                     c != _window._autocompleteBorder && 
                     c != _window._hoverBorder && 
@@ -476,7 +485,7 @@ namespace SpanCoder.Shell
                     Grid.SetRow(extDetailsView, 0);
                     Grid.SetColumn(extDetailsView, 0);
                     Grid.SetRowSpan(extDetailsView, 2);
-                    Grid.SetColumnSpan(extDetailsView, 2);
+                    Grid.SetColumnSpan(extDetailsView, 3);
                 }
             }
             else if (ActiveDocument != null && ActiveDocument.FilePath.StartsWith("gitdiff://"))
@@ -484,12 +493,14 @@ namespace SpanCoder.Shell
                 Canvas.IsVisible = false;
                 VScrollContainer.IsVisible = false;
                 HScrollContainer.IsVisible = false;
+                VSplitContainer.IsVisible = false;
 
                 // Remove existing Custom views if any
                 var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
                     c != Canvas && 
                     c != VScrollContainer && 
                     c != HScrollContainer && 
+                    c != VSplitContainer && 
                     !(c is FindReplaceOverlay) && 
                     c != _window._autocompleteBorder && 
                     c != _window._hoverBorder && 
@@ -509,7 +520,7 @@ namespace SpanCoder.Shell
                     Grid.SetRow(gitDiffView, 0);
                     Grid.SetColumn(gitDiffView, 0);
                     Grid.SetRowSpan(gitDiffView, 2);
-                    Grid.SetColumnSpan(gitDiffView, 2);
+                    Grid.SetColumnSpan(gitDiffView, 3);
                 }
             }
             else
@@ -517,12 +528,14 @@ namespace SpanCoder.Shell
                 Canvas.IsVisible = true;
                 VScrollContainer.IsVisible = true;
                 HScrollContainer.IsVisible = true;
+                UpdateSplitHandlesVisibility();
 
                 // Remove existing Custom views if any
                 var customControls = EditorGrid.Children.Cast<Control>().Where(c => 
                     c != Canvas && 
                     c != VScrollContainer && 
                     c != HScrollContainer && 
+                    c != VSplitContainer && 
                     !(c is FindReplaceOverlay) && 
                     c != _window._autocompleteBorder && 
                     c != _window._hoverBorder && 
@@ -542,7 +555,7 @@ namespace SpanCoder.Shell
                 FindReplaceOverlay = new FindReplaceOverlay(this);
                 EditorGrid.Children.Add(FindReplaceOverlay);
                 Grid.SetRow(FindReplaceOverlay, 0);
-                Grid.SetColumn(FindReplaceOverlay, 0);
+                Grid.SetColumn(FindReplaceOverlay, 1);
             }
             FindReplaceOverlay.Show(showReplace);
         }
@@ -552,6 +565,7 @@ namespace SpanCoder.Shell
             bool isSplit = _window.EditorPanesCount >= 2;
             SplitHandle.IsVisible = !isSplit;
             VSplitHandle.IsVisible = !isSplit;
+            VSplitContainer.IsVisible = !isSplit;
         }
     }
 }

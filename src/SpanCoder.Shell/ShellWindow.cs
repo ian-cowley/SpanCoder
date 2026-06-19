@@ -3012,15 +3012,16 @@ namespace SpanCoder.Shell
                 }
             }
 
-            _openDocuments.Remove(docToClose);
+            var pane = _editorPanes.FirstOrDefault(p => p.OpenDocuments.Contains(docToClose));
+            if (pane == null) return;
 
-            if (_activeDocument == docToClose)
+            pane.OpenDocuments.Remove(docToClose);
+
+            if (pane.OpenDocuments.Count == 0)
             {
-                if (_openDocuments.Count > 0)
+                if (_editorPanes.Count > 1)
                 {
-                    var nextDoc = _openDocuments[^1];
-                    _activeDocument = null;
-                    SwitchToDocument(nextDoc);
+                    UnsplitPane(pane);
                 }
                 else
                 {
@@ -3030,16 +3031,33 @@ namespace SpanCoder.Shell
                     _canvas.MoveCaret(0, 0);
                     _canvas.ScrollX = 0;
                     _canvas.ScrollY = 0;
-                    RebuildTabsUI();
+                    RebuildTabsUI(pane);
                     UpdateScrollbars();
                     UpdateStatusBar();
-                    _activePane.UpdateDocumentView();
+                    pane.UpdateDocumentView();
                 }
             }
             else
             {
-                RebuildTabsUI();
+                if (pane.ActiveDocument == docToClose)
+                {
+                    var nextDoc = pane.OpenDocuments[^1];
+                    pane.ActiveDocument = nextDoc;
+                    if (_activePane == pane)
+                    {
+                        SwitchToDocument(nextDoc);
+                    }
+                    else
+                    {
+                        RebuildTabsUI(pane);
+                    }
+                }
+                else
+                {
+                    RebuildTabsUI(pane);
+                }
             }
+
             UpdateEditMenuState();
         }
 
@@ -3377,11 +3395,17 @@ namespace SpanCoder.Shell
             _editorSplitContainer.Children.Add(remainingPane);
             Grid.SetRow(remainingPane, 0);
             Grid.SetColumn(remainingPane, 0);
+            Grid.SetRowSpan(remainingPane, 1);
+            Grid.SetColumnSpan(remainingPane, 1);
 
             SetActivePane(remainingPane);
 
             // Update split handles visibility on the remaining pane
             remainingPane.UpdateSplitHandlesVisibility();
+
+            // Force layout update to restore everything back to normal
+            _editorSplitContainer.InvalidateMeasure();
+            _editorSplitContainer.InvalidateArrange();
         }
 
         public void UnsplitActivePane()

@@ -44,55 +44,31 @@ namespace SpanCoder.Shell
             this.ItemsSource = _rootItems;
             this.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled);
 
-            this.DoubleTapped += (s, e) =>
-            {
-                if (SelectedItem is TreeViewItem item && item.Tag is string path && !Directory.Exists(path) && !path.StartsWith("SolutionFolder:"))
-                {
-                    FileSelected?.Invoke(path);
-                }
-            };
-
-            this.PointerPressed += (s, e) =>
+            this.AddHandler(PointerPressedEvent, new EventHandler<PointerPressedEventArgs>((s, e) =>
             {
                 if (e.GetCurrentPoint(this).Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed)
                 {
                     var visual = e.Source as Avalonia.Visual;
-                    while (visual != null && visual != this)
+                    var item = visual?.FindAncestorOfType<TreeViewItem>();
+                    if (item != null && item.Tag is string path)
                     {
-                        if (visual is TreeViewItem item)
+                        bool isExpandableFolder = Directory.Exists(path) || path.StartsWith("SolutionFolder:");
+                        if (isExpandableFolder)
                         {
                             var headerVisual = item.Header as Avalonia.Visual;
-                            if (headerVisual != null && IsDescendantOf(e.Source as Avalonia.Visual, headerVisual))
+                            if (headerVisual != null && IsDescendantOf(visual, headerVisual))
                             {
-                                if (item.Tag is string path)
-                                {
-                                    if (e.ClickCount == 2)
-                                    {
-                                        if (!Directory.Exists(path) && !path.StartsWith("SolutionFolder:"))
-                                        {
-                                            FileSelected?.Invoke(path);
-                                            e.Handled = true;
-                                            return;
-                                        }
-                                    }
-
-                                    // Single-click should only expand actual directories or SolutionFolders.
-                                    // Project files and solutions are files and should not expand/collapse on single-click.
-                                    bool isExpandableFolder = Directory.Exists(path) || path.StartsWith("SolutionFolder:");
-
-                                    if (isExpandableFolder)
-                                    {
-                                        item.IsExpanded = !item.IsExpanded;
-                                        e.Handled = true;
-                                    }
-                                }
+                                item.IsExpanded = !item.IsExpanded;
+                                e.Handled = true;
                             }
-                            break;
                         }
-                        visual = visual.GetVisualParent();
+                        else
+                        {
+                            FileSelected?.Invoke(path);
+                        }
                     }
                 }
-            };
+            }), RoutingStrategies.Bubble, handledEventsToo: true);
         }
 
         private static bool IsDescendantOf(Avalonia.Visual? child, Avalonia.Visual parent)
@@ -1020,12 +996,8 @@ namespace SpanCoder.Shell
         private async Task HandleManageNuGet(string projectPath)
         {
             if (_ownerWindow == null) return;
-            var packageName = await InputDialog.PromptAsync(_ownerWindow, "Manage NuGet Packages", "Enter NuGet package name to add:");
-            if (string.IsNullOrWhiteSpace(packageName)) return;
-
-            string projectDir = Path.GetDirectoryName(projectPath) ?? "";
-            string projectName = Path.GetFileNameWithoutExtension(projectPath);
-            await RunDotnetCommand(projectDir, $"add \"{projectPath}\" package \"{packageName}\"", $"Add NuGet Package {packageName} to {projectName}");
+            var managerWin = new NuGetManagerWindow(projectPath, _ownerWindow);
+            await managerWin.ShowDialog(_ownerWindow);
         }
 
         private async Task RunDotnetCommand(string workingDir, string arguments, string taskName)

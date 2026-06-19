@@ -509,3 +509,8 @@ This produces a fully compiled native binary in the publish folder, ready for di
 
 > [!IMPORTANT]
 > **Extensibility Core Promise**: Every component inside SpanCoder is designed to communicate via messages, ensuring no shared memory exists between plugins, debuggers, or the main application thread. This ensures the IDE remains operational even when external language services or debugger sessions encounter severe errors.
+
+---
+
+## Credits
+Developed by Ian Cowley and Antigravity (Google DeepMind).

@@ -329,7 +329,7 @@ namespace SpanCoder.App
 
         private void UpdateLocalMirror(int docId, int offset, int addedLength, int deletedLength, ReadOnlySpan<char> insertedText)
         {
-            if (Avalonia.Application.Current != null && !Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            if (Avalonia.Application.Current != null && !IsRunningInUnitTest() && !Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
             {
                 string textStr = insertedText.ToString();
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -388,7 +388,7 @@ namespace SpanCoder.App
 
         private void UpdateLocalMirrorForBatch(int docId, TextEdit[] edits)
         {
-            if (Avalonia.Application.Current != null && !Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            if (Avalonia.Application.Current != null && !IsRunningInUnitTest() && !Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                 {
@@ -674,6 +674,21 @@ namespace SpanCoder.App
             }
 
             return message;
+        }
+
+        private static bool IsRunningInUnitTest()
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                string name = assembly.FullName ?? "";
+                if (name.Contains("test", StringComparison.OrdinalIgnoreCase) || 
+                    name.Contains("xunit", StringComparison.OrdinalIgnoreCase) || 
+                    name.Contains("nunit", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 }

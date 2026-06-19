@@ -25,6 +25,7 @@ namespace SpanCoder.Shell
     {
         public event Action<List<GitFileStatus>>? StatusChanged;
         public event Action<string, Dictionary<int, GitLineChangeType>>? LineChangesUpdated;
+        public event Action<string>? BranchChanged;
 
         private string? _workingDirectory;
         private string? _activeFilePath;
@@ -63,6 +64,10 @@ namespace SpanCoder.Shell
                     var lineChanges = await QueryLineChangesAsync(_activeFilePath);
                     LineChangesUpdated?.Invoke(_activeFilePath, lineChanges);
                 }
+
+                // 3. Get current branch
+                string branch = await GetCurrentBranchAsync();
+                BranchChanged?.Invoke(branch);
             }
             catch (Exception ex)
             {
@@ -392,6 +397,64 @@ namespace SpanCoder.Shell
             {
                 return "";
             }
+        }
+
+        public async Task<string> GetCurrentBranchAsync()
+        {
+            if (string.IsNullOrEmpty(_workingDirectory)) return "";
+            string output = await RunGitCommandAsync("rev-parse --abbrev-ref HEAD");
+            return output.Trim();
+        }
+
+        public async Task<List<string>> GetLocalBranchesAsync()
+        {
+            var branches = new List<string>();
+            if (string.IsNullOrEmpty(_workingDirectory)) return branches;
+
+            string output = await RunGitCommandAsync("branch");
+            using var reader = new StringReader(output);
+            string? line;
+            while ((line = await reader.ReadLineAsync()) != null)
+            {
+                string name = line.Replace("*", "").Trim();
+                if (!string.IsNullOrEmpty(name))
+                {
+                    branches.Add(name);
+                }
+            }
+            return branches;
+        }
+
+        public async Task<bool> CheckoutBranchAsync(string branchName)
+        {
+            if (string.IsNullOrEmpty(_workingDirectory)) return false;
+            await RunGitCommandAsync($"checkout \"{branchName}\"");
+            return true;
+        }
+
+        public async Task<bool> CreateAndCheckoutBranchAsync(string branchName)
+        {
+            if (string.IsNullOrEmpty(_workingDirectory)) return false;
+            await RunGitCommandAsync($"checkout -b \"{branchName}\"");
+            return true;
+        }
+
+        public async Task PullAsync()
+        {
+            if (string.IsNullOrEmpty(_workingDirectory)) return;
+            await RunGitCommandAsync("pull");
+        }
+
+        public async Task StageAllAsync()
+        {
+            if (string.IsNullOrEmpty(_workingDirectory)) return;
+            await RunGitCommandAsync("add .");
+        }
+
+        public async Task UnstageAllAsync()
+        {
+            if (string.IsNullOrEmpty(_workingDirectory)) return;
+            await RunGitCommandAsync("restore --staged .");
         }
     }
 }

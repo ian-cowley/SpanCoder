@@ -16,6 +16,7 @@ using Avalonia.Threading;
 using Avalonia.Controls.Templates;
 using SpanCoder.Contracts;
 using System.Buffers;
+using Avalonia.Styling;
 
 
 namespace SpanCoder.Shell
@@ -39,9 +40,17 @@ namespace SpanCoder.Shell
         }
 
         public TextEditorCanvas ActiveCanvas => _canvas;
+        internal CommandPalette CommandPalette => _commandPalette;
+        internal Border GitBranchStatusBlock => _gitBranchStatusBlock;
+        internal Button? BtnGitPull;
+        internal Button? BtnGitStageAll;
+        internal Button? BtnGitUnstageAll;
 
         private TextBlock _statusBar = null!;
         private StackPanel _statusBarExtensionPanel = null!;
+        private Border _gitBranchStatusBlock = null!;
+        private TextBlock _gitBranchStatusText = null!;
+        private StackPanel _leftStatusBarPanel = null!;
         
         internal Border _debugToolbar = null!;
         private ListBox _debugVariablesList = null!;
@@ -64,6 +73,9 @@ namespace SpanCoder.Shell
 
         private IExtensionManager? _extensionManager;
         internal TabControl _sidebarTabControl = null!;
+        private StackPanel _activityBarPanel = null!;
+        private readonly List<Button> _activityBarButtons = new();
+        private readonly List<Border> _activityBarIndicators = new();
         private AiChatPanel _aiChatPanel = null!;
         private FindReplaceFilesWindow? _findReplaceFilesWindow;
         internal TabControl _bottomTabControl = null!;
@@ -115,6 +127,42 @@ namespace SpanCoder.Shell
             Width = 900;
             Height = 600;
             Background = Brushes.Black;
+
+            // Set App Icon dynamically
+            try
+            {
+                using (var rt = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize(64, 64), new Vector(96, 96)))
+                {
+                    using (var ctx = rt.CreateDrawingContext())
+                    {
+                        // Draw dark background with rounded corners
+                        ctx.DrawRectangle(
+                            new SolidColorBrush(Color.Parse("#1E1E1E")),
+                            null,
+                            new Rect(0, 0, 64, 64),
+                            10, 10);
+
+                        // Draw logo code-cube shape
+                        var brush = new LinearGradientBrush
+                        {
+                            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                            EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+                            GradientStops =
+                            {
+                                new GradientStop(Color.Parse("#007ACC"), 0),
+                                new GradientStop(Color.Parse("#0098FF"), 1)
+                            }
+                        };
+
+                        ctx.DrawGeometry(brush, null, StreamGeometry.Parse("M16,16 L32,8 L48,16 L48,48 L32,56 L16,48 Z M24,24 L24,40 L32,44 L40,40 L40,24 L32,20 Z"));
+                    }
+                    this.Icon = new WindowIcon(rt);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ShellWindow] Failed to create dynamic icon: {ex.Message}");
+            }
 
             // Intercept Alt key down/up to defend TextEditorCanvas focus from menu mnemonics activation
             AddHandler(InputElement.KeyDownEvent, (s, e) =>
@@ -191,10 +239,24 @@ namespace SpanCoder.Shell
 
             // 2. Workspace Layout
             var workspaceGrid = new Grid();
+            
+            // Column 0: Activity Bar
+            workspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+            // Column 1: Sidebar
             _sidebarCol = new ColumnDefinition { Width = new GridLength(220), MinWidth = 150 };
-            workspaceGrid.ColumnDefinitions.Add(_sidebarCol); // Sidebar
-            workspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Splitter
-            workspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Editor Pane
+            workspaceGrid.ColumnDefinitions.Add(_sidebarCol);
+            // Column 2: Splitter
+            workspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+            // Column 3: Editor Pane
+            workspaceGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+
+            _activityBarPanel = new StackPanel
+            {
+                Width = 48,
+                Background = new SolidColorBrush(Color.Parse("#181818")),
+                Orientation = Orientation.Vertical,
+                Spacing = 8
+            };
 
             // 2.1. Sidebar TabControl
             _sidebarTabControl = new TabControl
@@ -203,6 +265,21 @@ namespace SpanCoder.Shell
                 TabStripPlacement = Dock.Top,
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
+
+            // Collapse horizontal tab headers so only Activity Bar controls switching
+            _sidebarTabControl.Styles.Add(new Avalonia.Styling.Style(x => x.OfType<TabItem>())
+            {
+                Setters =
+                {
+                    new Setter(TabItem.HeightProperty, 0.0),
+                    new Setter(TabItem.WidthProperty, 0.0),
+                    new Setter(TabItem.PaddingProperty, new Thickness(0)),
+                    new Setter(TabItem.MarginProperty, new Thickness(0)),
+                    new Setter(TabItem.OpacityProperty, 0.0),
+                    new Setter(TabItem.IsEnabledProperty, false),
+                    new Setter(TabItem.FocusableProperty, false)
+                }
+            });
 
             var explorerGrid = new Grid();
             explorerGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Header
@@ -268,9 +345,93 @@ namespace SpanCoder.Shell
             gitGrid.RowDefinitions.Add(new RowDefinition(new GridLength(1.0, GridUnitType.Star))); // Changes ListBox
             gitGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Commit section
 
-            var gitHeader = new TextBlock { Text = "CHANGES", Foreground = Brushes.DarkGray, FontSize = 11, Padding = new Thickness(10, 8, 10, 4), FontWeight = FontWeight.Bold };
-            gitGrid.Children.Add(gitHeader);
-            Grid.SetRow(gitHeader, 0);
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+
+            var gitHeader = new TextBlock
+            {
+                Text = "CHANGES",
+                Foreground = Brushes.DarkGray,
+                FontSize = 11,
+                Padding = new Thickness(10, 8, 10, 4),
+                FontWeight = FontWeight.Bold,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            headerGrid.Children.Add(gitHeader);
+            Grid.SetColumn(gitHeader, 0);
+
+            var gitToolbar = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 4, 10, 0),
+                Spacing = 4
+            };
+            
+            BtnGitPull = new Button
+            {
+                Content = "Pull",
+                FontSize = 10,
+                Padding = new Thickness(6, 2),
+                Background = new SolidColorBrush(Color.Parse("#333333")),
+                Foreground = Brushes.White,
+                Cursor = new Cursor(StandardCursorType.Hand)
+            };
+            BtnGitPull.Click += async (s, e) =>
+            {
+                if (string.IsNullOrEmpty(_fileTree.RootPath)) return;
+                _statusBar.Text = "Pulling from remote...";
+                await _gitProvider.PullAsync();
+                _statusBar.Text = "Pulled from remote.";
+                await RefreshGitStatusAsync();
+            };
+
+            BtnGitStageAll = new Button
+            {
+                Content = "Stage All",
+                FontSize = 10,
+                Padding = new Thickness(6, 2),
+                Background = new SolidColorBrush(Color.Parse("#333333")),
+                Foreground = Brushes.White,
+                Cursor = new Cursor(StandardCursorType.Hand)
+            };
+            BtnGitStageAll.Click += async (s, e) =>
+            {
+                if (string.IsNullOrEmpty(_fileTree.RootPath)) return;
+                _statusBar.Text = "Staging all files...";
+                await _gitProvider.StageAllAsync();
+                _statusBar.Text = "Staged all files.";
+                await RefreshGitStatusAsync();
+            };
+
+            BtnGitUnstageAll = new Button
+            {
+                Content = "Unstage All",
+                FontSize = 10,
+                Padding = new Thickness(6, 2),
+                Background = new SolidColorBrush(Color.Parse("#333333")),
+                Foreground = Brushes.White,
+                Cursor = new Cursor(StandardCursorType.Hand)
+            };
+            BtnGitUnstageAll.Click += async (s, e) =>
+            {
+                if (string.IsNullOrEmpty(_fileTree.RootPath)) return;
+                _statusBar.Text = "Unstaging all files...";
+                await _gitProvider.UnstageAllAsync();
+                _statusBar.Text = "Unstaged all files.";
+                await RefreshGitStatusAsync();
+            };
+
+            gitToolbar.Children.Add(BtnGitPull);
+            gitToolbar.Children.Add(BtnGitStageAll);
+            gitToolbar.Children.Add(BtnGitUnstageAll);
+            
+            headerGrid.Children.Add(gitToolbar);
+            Grid.SetColumn(gitToolbar, 1);
+
+            gitGrid.Children.Add(headerGrid);
+            Grid.SetRow(headerGrid, 0);
 
             _gitChangesList = new ListBox
             {
@@ -905,10 +1066,21 @@ namespace SpanCoder.Shell
             };
             _sidebarTabControl.Items.Add(aiTab);
 
-             RefreshExtensionsList();
+            RefreshExtensionsList();
 
+            // Column 0: Activity Bar
+            workspaceGrid.Children.Add(_activityBarPanel);
+            Grid.SetColumn(_activityBarPanel, 0);
+
+            // Column 1: Sidebar TabControl
             workspaceGrid.Children.Add(_sidebarTabControl);
-            Grid.SetColumn(_sidebarTabControl, 0);
+            Grid.SetColumn(_sidebarTabControl, 1);
+
+            SetupActivityBar();
+            _sidebarTabControl.SelectionChanged += (s, e) =>
+            {
+                UpdateActivityBarSelection(_sidebarTabControl.SelectedIndex);
+            };
 
             // 2.2. Grid Splitter
             _sidebarSplitter = new GridSplitter
@@ -918,7 +1090,7 @@ namespace SpanCoder.Shell
                 ResizeDirection = GridResizeDirection.Columns
             };
             workspaceGrid.Children.Add(_sidebarSplitter);
-            Grid.SetColumn(_sidebarSplitter, 1);
+            Grid.SetColumn(_sidebarSplitter, 2);
 
             // 2.3. Editor Pane (Tabs + Editor Canvas Container)
             _editorPaneGrid = new Grid();
@@ -1127,7 +1299,7 @@ namespace SpanCoder.Shell
             }
 
             workspaceGrid.Children.Add(_editorPaneGrid);
-            Grid.SetColumn(_editorPaneGrid, 2);
+            Grid.SetColumn(_editorPaneGrid, 3);
 
             mainGrid.Children.Add(workspaceGrid);
             Grid.SetRow(workspaceGrid, 2);
@@ -1141,15 +1313,68 @@ namespace SpanCoder.Shell
             _statusBarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); // Left status text
             _statusBarGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto)); // Right extension controls
 
+            _leftStatusBarPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            _gitBranchStatusText = new TextBlock
+            {
+                Text = "Git: -",
+                Foreground = Brushes.White,
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            _gitBranchStatusBlock = new Border
+            {
+                Background = Brushes.Transparent,
+                Padding = new Thickness(10, 0),
+                Height = 22,
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor = new Cursor(StandardCursorType.Hand),
+                Child = _gitBranchStatusText
+            };
+
+            _gitBranchStatusBlock.PointerEntered += (s, e) =>
+            {
+                _gitBranchStatusBlock.Background = new SolidColorBrush(Color.Parse("#2D2D2D"));
+            };
+            _gitBranchStatusBlock.PointerExited += (s, e) =>
+            {
+                _gitBranchStatusBlock.Background = Brushes.Transparent;
+            };
+
+            _gitBranchStatusBlock.PointerPressed += async (s, e) =>
+            {
+                e.Handled = true;
+                await OpenBranchSwitcherPaletteAsync();
+            };
+
+            _leftStatusBarPanel.Children.Add(_gitBranchStatusBlock);
+
+            var barSeparator = new TextBlock
+            {
+                Text = "|",
+                Foreground = Brushes.DarkGray,
+                Margin = new Thickness(4, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 11
+            };
+            _leftStatusBarPanel.Children.Add(barSeparator);
+
             _statusBar = new TextBlock
             {
                 Foreground = Brushes.DarkGray,
-                Padding = new Thickness(8, 2),
+                Padding = new Thickness(8, 0),
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 12
+                FontSize = 11
             };
-            _statusBarGrid.Children.Add(_statusBar);
-            Grid.SetColumn(_statusBar, 0);
+            _leftStatusBarPanel.Children.Add(_statusBar);
+
+            _statusBarGrid.Children.Add(_leftStatusBarPanel);
+            Grid.SetColumn(_leftStatusBarPanel, 0);
 
             _statusBarExtensionPanel = new StackPanel
             {
@@ -1336,6 +1561,122 @@ namespace SpanCoder.Shell
                     UpdatePluginStatusBarItem(extId, itemId, text, tooltip, commandId);
                 });
             };
+        }
+
+        private void SetupActivityBar()
+        {
+            _activityBarButtons.Clear();
+            _activityBarIndicators.Clear();
+            _activityBarPanel.Children.Clear();
+
+            // Add top spacer to simulate padding
+            _activityBarPanel.Children.Add(new Border { Height = 8 });
+
+            // 0: Explorer
+            AddActivityBarButton(0, "M19,3 H5 C3.9,3 3,3.9 3,5 V19 C3,20.1 3.9,21 5,21 H19 C20.1,21 21,20.1 21,19 V5 C21,3.9 20.1,3 19,3 Z M14,17 H7 V15 H14 V17 Z M17,13 H7 V11 H17 V13 Z M17,9 H7 V7 H17 V9 Z", "#519ABA", "Explorer");
+            // 1: Source Control
+            AddActivityBarButton(1, "M12,2 C6.48,2 2,6.48 2,12 C2,15.62 3.9,18.8 6.75,20.6 L6.75,20.65 L6.75,22 C6.75,22.55 7.2,23 7.75,23 C8.3,23 8.75,22.55 8.75,22 L8.75,20.25 L9,20 C10,19.3 11,19 12,19 C13,19 14,19.3 15,20 L15.25,20.25 L15.25,22 C15.25,22.55 15.7,23 16.25,23 C16.8,23 17.25,22.55 17.25,22 L17.25,20.65 C20.1,18.8 22,15.62 22,12 C22,6.48 17.52,2 12,2 Z", "#F05032", "Source Control");
+            // 2: Run & Debug
+            AddActivityBarButton(2, "M19,8 H16.24 A6,6 0 0,0 12,5 A6,6 0 0,0 7.76,8 H5 A1,1 0 0,0 5,10 H7.12 A6,6 0 0,0 7,12 A6,6 0 0,0 7.12,14 H5 A1,1 0 0,0 5,16 H7.76 A6,6 0 0,0 12,19 A6,6 0 0,0 16.24,16 H19 A1,1 0 0,0 19,14 H16.88 A6,6 0 0,0 17,12 A6,6 0 0,0 16.88,10 H19 A1,1 0 0,0 19,8 Z", "#75B943", "Run and Debug");
+            // 3: Extensions
+            AddActivityBarButton(3, "M20.5,11 H19 V9 C19,7.9 18.1,7 17,7 H15 V5.5 C15,4.12 13.88,3 12.5,3 C11.12,3 10,4.12 10,5.5 V7 H8 C6.9,7 6,7.9 6,9 V11 H4.5 C3.12,11 2,12.12 2,13.5 C2,14.88 3.12,16 4.5,16 H6 V18 C6,19.1 6.9,20 8,20 H10 V21.5 C10,22.88 11.12,24 12.5,24 C13.88,24 15,22.88 15,21.5 V20 H17 C18.1,20 19,19.1 19,18 V16 H20.5 C21.88,16 23,14.88 23,13.5 C23,12.12 21.88,11 20.5,11 Z", "#3F51B5", "Extensions");
+            // 4: AI Chat
+            AddActivityBarButton(4, "M20,2 H4 C2.9,2 2,2.9 2,4 V22 L6,18 H20 C21.1,18 22,17.1 22,16 V4 C22,2.9 21.1,2 20,2 Z M18,14 H6 V12 H18 V14 Z M18,10 H6 V8 H18 V10 Z", "#007ACC", "AI Chat");
+
+            UpdateActivityBarSelection(0);
+        }
+
+        private void AddActivityBarButton(int index, string pathData, string iconColor, string tooltipText)
+        {
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) }); // Active indicator
+            grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+
+            var indicator = new Border
+            {
+                Width = 3,
+                Height = 24,
+                Background = new SolidColorBrush(Color.Parse(iconColor)),
+                CornerRadius = new CornerRadius(1.5),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+                IsVisible = false
+            };
+            grid.Children.Add(indicator);
+            Grid.SetColumn(indicator, 0);
+            _activityBarIndicators.Add(indicator);
+
+            var button = new Button
+            {
+                Background = Brushes.Transparent,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Width = 40,
+                Height = 40,
+                Padding = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            ToolTip.SetTip(button, tooltipText);
+            button.Click += (s, e) =>
+            {
+                if (_sidebarCol.Width.Value <= 50)
+                {
+                    // If collapsed, expand to default
+                    _sidebarCol.Width = new GridLength(220);
+                }
+                else if (_sidebarTabControl.SelectedIndex == index)
+                {
+                    // Toggle collapse if clicking the already active tab
+                    _sidebarCol.Width = new GridLength(0);
+                }
+                
+                _sidebarTabControl.SelectedIndex = index;
+                UpdateActivityBarSelection(index);
+            };
+
+            var iconPath = new Avalonia.Controls.Shapes.Path
+            {
+                Width = 20,
+                Height = 20,
+                Data = StreamGeometry.Parse(pathData),
+                Fill = new SolidColorBrush(Color.Parse("#858585")), // Dim color by default
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            button.Content = iconPath;
+
+            grid.Children.Add(button);
+            Grid.SetColumn(button, 1);
+            _activityBarButtons.Add(button);
+
+            _activityBarPanel.Children.Add(grid);
+        }
+
+        private void UpdateActivityBarSelection(int selectedIndex)
+        {
+            for (int i = 0; i < _activityBarButtons.Count; i++)
+            {
+                var button = _activityBarButtons[i];
+                var indicator = _activityBarIndicators[i];
+                var iconPath = button.Content as Avalonia.Controls.Shapes.Path;
+
+                bool isActive = i == selectedIndex && _sidebarCol.Width.Value > 50;
+
+                if (indicator != null)
+                {
+                    indicator.IsVisible = isActive;
+                }
+
+                if (iconPath != null)
+                {
+                    // Active button has fully lit/colored icon. Inactive has grey/dim icon.
+                    iconPath.Fill = isActive 
+                        ? (indicator?.Background ?? Brushes.Gray) 
+                        : new SolidColorBrush(Color.Parse("#858585"));
+                }
+            }
         }
 
         private void TrackExtensionUiElement(string extensionId, Control control)
@@ -2461,7 +2802,7 @@ namespace SpanCoder.Shell
             OpenFile(filePath);
         }
 
-        private void OpenFile(string filePath)
+        internal void OpenFile(string filePath)
         {
             if (_engine == null) return;
 
@@ -3776,6 +4117,14 @@ namespace SpanCoder.Shell
                 });
             };
 
+            _gitProvider.BranchChanged += (branch) =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    _gitBranchStatusText.Text = string.IsNullOrEmpty(branch) ? "Git: -" : $"Git: {branch}";
+                });
+            };
+
             _gitProvider.LineChangesUpdated += (filePath, lineChanges) =>
             {
                 Dispatcher.UIThread.Post(() =>
@@ -3810,6 +4159,71 @@ namespace SpanCoder.Shell
             {
                 _gitProvider.SetWorkingDirectory(workingDir);
                 await _gitProvider.RefreshAsync(_canvas.Document?.FilePath);
+            }
+        }
+
+        internal async Task OpenBranchSwitcherPaletteAsync()
+        {
+            if (_gitProvider == null) return;
+            
+            try
+            {
+                var branches = await _gitProvider.GetLocalBranchesAsync();
+                var items = new List<SearchItem>();
+                
+                // Add Create new branch... option
+                items.Add(new SearchItem("Create new branch...", "Checkout a new branch", "", "Action", "create_branch"));
+                
+                foreach (var branch in branches)
+                {
+                    items.Add(new SearchItem(branch, "Local branch", "", "Action", branch));
+                }
+                
+                _commandPalette.ShowCustom("Select a branch to checkout...", items, async (selected) =>
+                {
+                    string actionOrBranch = (string)selected.AssociatedData;
+                    if (actionOrBranch == "create_branch")
+                    {
+                        await PromptAndCreateBranchAsync();
+                    }
+                    else
+                    {
+                        _statusBar.Text = $"Checking out branch '{actionOrBranch}'...";
+                        bool success = await _gitProvider.CheckoutBranchAsync(actionOrBranch);
+                        if (success)
+                        {
+                            _statusBar.Text = $"Checked out branch '{actionOrBranch}'.";
+                            await RefreshGitStatusAsync();
+                        }
+                        else
+                        {
+                            _statusBar.Text = $"Failed to checkout branch '{actionOrBranch}'.";
+                        }
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _statusBar.Text = $"Error loading branches: {ex.Message}";
+            }
+        }
+
+        private async Task PromptAndCreateBranchAsync()
+        {
+            if (_gitProvider == null) return;
+            string? branchName = await InputDialog.PromptAsync(this, "Create Branch", "Enter new branch name:");
+            if (string.IsNullOrWhiteSpace(branchName)) return;
+
+            _statusBar.Text = $"Creating and checking out branch '{branchName}'...";
+            bool success = await _gitProvider.CreateAndCheckoutBranchAsync(branchName.Trim());
+            if (success)
+            {
+                _statusBar.Text = $"Created and checked out branch '{branchName}'.";
+                await RefreshGitStatusAsync();
+            }
+            else
+            {
+                _statusBar.Text = $"Failed to create branch '{branchName}'.";
             }
         }
 

@@ -50,9 +50,18 @@ namespace SpanCoder.Shell
         private readonly List<SearchItem> _filteredItems = new();
         private readonly List<SearchItem> _lspSymbols = new();
         private bool _hasLspSymbols;
+        private bool _isCustomMode;
+        private Action<SearchItem>? _customSelectionCallback;
+        private readonly List<SearchItem> _customItems = new();
         
         private string? _lastScannedWorkspace;
         private readonly object _filesLock = new();
+
+        internal TextBox SearchBox => _searchBox;
+        internal ListBox ListBox => _listBox;
+        internal bool IsCustomMode => _isCustomMode;
+        internal List<SearchItem> FilteredItems => _filteredItems;
+        internal void TriggerCommitSelection() => CommitSelection();
 
         public CommandPalette(ShellWindow window)
         {
@@ -312,6 +321,10 @@ namespace SpanCoder.Shell
 
         public void Show(IEnumerable<CommandDescriptor> commands)
         {
+            _isCustomMode = false;
+            _customSelectionCallback = null;
+            _searchBox.Watermark = "Search files, symbols (@), or run commands (>)...";
+
             _staticActions.Clear();
             foreach (var cmd in commands)
             {
@@ -346,8 +359,30 @@ namespace SpanCoder.Shell
             _searchBox.Focus();
         }
 
+        public void ShowCustom(string watermark, IEnumerable<SearchItem> items, Action<SearchItem> onSelected)
+        {
+            _isCustomMode = true;
+            _customSelectionCallback = onSelected;
+            _customItems.Clear();
+            _customItems.AddRange(items);
+
+            _searchBox.Text = "";
+            _searchBox.Watermark = watermark;
+
+            _staticActions.Clear();
+            _workspaceFiles.Clear();
+            _lspSymbols.Clear();
+            _hasLspSymbols = false;
+
+            IsVisible = true;
+            FilterItems();
+            _searchBox.Focus();
+        }
+
         public void Hide()
         {
+            _isCustomMode = false;
+            _customSelectionCallback = null;
             IsVisible = false;
             _window.ReturnFocusToEditor();
         }
@@ -406,6 +441,21 @@ namespace SpanCoder.Shell
             _grepCts = null;
 
             string queryText = _searchBox.Text ?? "";
+
+            if (_isCustomMode)
+            {
+                _filteredItems.Clear();
+                _filteredItems.AddRange(_customItems.Where(x => Match(x.DisplayName, queryText) || Match(x.Detail, queryText)));
+                _listBox.ItemsSource = null;
+                _listBox.ItemsSource = _filteredItems;
+                if (_filteredItems.Count > 0)
+                {
+                    _listBox.SelectedIndex = 0;
+                }
+                UpdateTabsHighlight("all");
+                return;
+            }
+
             string cleanQuery = queryText;
 
             string mode = "all";
@@ -690,6 +740,14 @@ namespace SpanCoder.Shell
         {
             var selected = _listBox.SelectedItem as SearchItem;
             if (selected == null) return;
+
+            if (_isCustomMode && _customSelectionCallback != null)
+            {
+                var callback = _customSelectionCallback;
+                Hide();
+                callback(selected);
+                return;
+            }
 
             Hide();
 

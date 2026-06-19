@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <OutputPath>$(SolutionDir)src/SpanCoder.App/bin/$(Configuration)/net10.0/plugins/languages-extension/</OutputPath>
+    <OutputPath>$(MSBuildThisFileDirectory)..\SpanCoder.App\bin\$(Configuration)\net10.0\plugins\languages-extension\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 

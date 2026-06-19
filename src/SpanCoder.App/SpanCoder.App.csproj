@@ -13,6 +13,10 @@
     <ProjectReference Include="..\SpanCoder.Shell\SpanCoder.Shell.csproj" />
     <ProjectReference Include="..\SpanCoder.Engine\SpanCoder.Engine.csproj" />
     <ProjectReference Include="..\..\tools\SpanCoder.SourceGenerators\SpanCoder.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\SpanCoder.Extensions.Prettier\SpanCoder.Extensions.Prettier.csproj" ReferenceOutputAssembly="false" OutputItemType="None" />
+    <ProjectReference Include="..\SpanCoder.Extensions.Languages\SpanCoder.Extensions.Languages.csproj" ReferenceOutputAssembly="false" OutputItemType="None" />
+    <ProjectReference Include="..\SpanCoder.Extensions.HtmlPreview\SpanCoder.Extensions.HtmlPreview.csproj" ReferenceOutputAssembly="false" OutputItemType="None" />
+    <ProjectReference Include="..\SpanCoder.Extensions.Python\SpanCoder.Extensions.Python.csproj" ReferenceOutputAssembly="false" OutputItemType="None" />
   </ItemGroup>
 
   <ItemGroup>

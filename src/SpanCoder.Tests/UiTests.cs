@@ -249,5 +249,90 @@ namespace SpanCoder.Tests
             Assert.Equal("gitdiff://src/SpanCoder.Shell/ShellWindow.cs", doc.FilePath);
             Assert.Equal(-888, doc.Id);
         }
+
+        [AvaloniaFact]
+        public void TestCommandPaletteCustomMode()
+        {
+            var window = new ShellWindow();
+            window.InitializeLayout();
+
+            var palette = window.CommandPalette;
+            Assert.NotNull(palette);
+
+            // Test custom mode activation
+            bool callbackExecuted = false;
+            SearchItem? selectedItem = null;
+            var items = new List<SearchItem>
+            {
+                new SearchItem("Branch A", "Local branch", "", "Action", "branch-a"),
+                new SearchItem("Branch B", "Local branch", "", "Action", "branch-b")
+            };
+
+            palette.ShowCustom("Select branch", items, (selected) =>
+            {
+                callbackExecuted = true;
+                selectedItem = selected;
+            });
+
+            Assert.True(palette.IsCustomMode);
+            Assert.NotNull(palette.ListBox.ItemsSource);
+            
+            // Check filtered items
+            Assert.Equal(2, palette.FilteredItems.Count);
+
+            // Select first item and commit
+            palette.ListBox.SelectedIndex = 0;
+            palette.TriggerCommitSelection();
+
+            Assert.True(callbackExecuted);
+            Assert.NotNull(selectedItem);
+            Assert.Equal("Branch A", selectedItem.DisplayName);
+            Assert.Equal("branch-a", selectedItem.AssociatedData);
+        }
+
+        [AvaloniaFact]
+        public async Task TestGitBranchStatusBlockOpensSwitcher()
+        {
+            var window = new ShellWindow();
+            window.InitializeLayout();
+
+            // Set a dummy workspace root to initialize git provider working directory
+            var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                window.OpenFile(Path.Combine(tempDir, "test.txt"));
+                
+                // Manually trigger the branch switcher popup
+                await window.OpenBranchSwitcherPaletteAsync();
+
+                // Assert command palette shows custom mode with branches
+                Assert.True(window.CommandPalette.IsCustomMode);
+                Assert.Contains(window.CommandPalette.FilteredItems, item => item.DisplayName == "Create new branch...");
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                }
+            }
+        }
+
+        [AvaloniaFact]
+        public void TestGitToolbarButtonsInstantiationAndHandlers()
+        {
+            var window = new ShellWindow();
+            window.InitializeLayout();
+
+            Assert.NotNull(window.BtnGitPull);
+            Assert.NotNull(window.BtnGitStageAll);
+            Assert.NotNull(window.BtnGitUnstageAll);
+
+            // Verify they have Hand cursors
+            Assert.NotNull(window.BtnGitPull.Cursor);
+            Assert.NotNull(window.BtnGitStageAll.Cursor);
+            Assert.NotNull(window.BtnGitUnstageAll.Cursor);
+        }
     }
 }

@@ -26,8 +26,16 @@ jobs:
             archive_name: spancoder-osx-x64.tar.gz
 
     steps:
-      - name: Checkout repository
+      - name: Checkout SpanCoder
         uses: actions/checkout@v4
+        with:
+          path: SpanCoder
+
+      - name: Checkout Glacier.Grep
+        uses: actions/checkout@v4
+        with:
+          repository: ian-cowley/Glacier.Grep
+          path: Glacier.Grep
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -41,15 +49,19 @@ jobs:
           sudo apt-get install -y clang zlib1g-dev
 
       - name: Restore dependencies
+        working-directory: SpanCoder
         run: dotnet restore SpanCoder.slnx
 
       - name: Publish SpanCoder App
+        working-directory: SpanCoder
         run: dotnet publish src/SpanCoder.App/SpanCoder.App.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/
 
       - name: Publish SpanCoder Engine
+        working-directory: SpanCoder
         run: dotnet publish src/SpanCoder.Engine/SpanCoder.Engine.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/
 
       - name: Publish Extensions
+        working-directory: SpanCoder
         run: |
           dotnet publish src/SpanCoder.Extensions.Prettier/SpanCoder.Extensions.Prettier.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/plugins/prettier-extension/
           dotnet publish src/SpanCoder.Extensions.HtmlPreview/SpanCoder.Extensions.HtmlPreview.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/plugins/html-preview/
@@ -58,13 +70,15 @@ jobs:
 
       - name: Package Release (Windows)
         if: matrix.os == 'windows-latest'
+        working-directory: SpanCoder
         run: |
-          Compress-Archive -Path publish/* -DestinationPath ${{ matrix.archive_name }}
+          Compress-Archive -Path publish/* -DestinationPath ../${{ matrix.archive_name }}
 
       - name: Package Release (Linux/macOS)
         if: matrix.os != 'windows-latest'
+        working-directory: SpanCoder
         run: |
-          tar -czvf ${{ matrix.archive_name }} -C publish .
+          tar -czvf ../${{ matrix.archive_name }} -C publish .
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -81,16 +95,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: win-x64-build
+          path: ./
 
       - name: Download Linux Build
         uses: actions/download-artifact@v4
         with:
           name: linux-x64-build
+          path: ./
 
       - name: Download macOS Build
         uses: actions/download-artifact@v4
         with:
           name: osx-x64-build
+          path: ./
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

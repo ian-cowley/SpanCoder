@@ -9,6 +9,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.Platform.Storage;
 
 namespace SpanCoder.Shell
 {
@@ -138,15 +139,22 @@ namespace SpanCoder.Shell
             };
             browseBtn.Click += async (s, e) =>
             {
-                var dialog = new OpenFileDialog
+                var files = await this.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
                 {
                     Title = "Select ELF Executable File",
-                    Filters = new List<FileDialogFilter> { new FileDialogFilter { Name = "ELF Files (*.elf;*)", Extensions = new List<string> { "elf" } } }
-                };
-                var paths = await dialog.ShowAsync(this);
-                if (paths != null && paths.Length > 0)
+                    AllowMultiple = false,
+                    FileTypeFilter = new[]
+                    {
+                        new FilePickerFileType("ELF Files (*.elf)")
+                        {
+                            Patterns = new[] { "*.elf" }
+                        }
+                    }
+                });
+
+                if (files != null && files.Count > 0)
                 {
-                    string path = paths[0];
+                    string path = files[0].Path.LocalPath;
                     string? ws = _shellWindow.WorkspaceRootPath;
                     if (ws != null && path.StartsWith(ws, StringComparison.OrdinalIgnoreCase))
                     {

@@ -1,0 +1,103 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build SpanCoder
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            archive_name: spancoder-win-x64.zip
+          - os: ubuntu-latest
+            rid: linux-x64
+            archive_name: spancoder-linux-x64.tar.gz
+          - os: macos-latest
+            rid: osx-x64
+            archive_name: spancoder-osx-x64.tar.gz
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Native AOT Dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - name: Restore dependencies
+        run: dotnet restore SpanCoder.slnx
+
+      - name: Publish SpanCoder App
+        run: dotnet publish src/SpanCoder.App/SpanCoder.App.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/
+
+      - name: Publish SpanCoder Engine
+        run: dotnet publish src/SpanCoder.Engine/SpanCoder.Engine.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/
+
+      - name: Publish Extensions
+        run: |
+          dotnet publish src/SpanCoder.Extensions.Prettier/SpanCoder.Extensions.Prettier.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/plugins/prettier-extension/
+          dotnet publish src/SpanCoder.Extensions.HtmlPreview/SpanCoder.Extensions.HtmlPreview.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/plugins/html-preview/
+          dotnet publish src/SpanCoder.Extensions.Languages/SpanCoder.Extensions.Languages.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/plugins/languages-extension/
+          dotnet publish src/SpanCoder.Extensions.Python/SpanCoder.Extensions.Python.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish/plugins/python-lang/
+
+      - name: Package Release (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path publish/* -DestinationPath ${{ matrix.archive_name }}
+
+      - name: Package Release (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          tar -czvf ${{ matrix.archive_name }} -C publish .
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}-build
+          path: ${{ matrix.archive_name }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows Build
+        uses: actions/download-artifact@v4
+        with:
+          name: win-x64-build
+
+      - name: Download Linux Build
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x64-build
+
+      - name: Download macOS Build
+        uses: actions/download-artifact@v4
+        with:
+          name: osx-x64-build
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            spancoder-win-x64.zip
+            spancoder-linux-x64.tar.gz
+            spancoder-osx-x64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

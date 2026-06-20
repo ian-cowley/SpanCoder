@@ -106,17 +106,17 @@ namespace SpanCoder.Tests
                 Assert.True(registered, "Extension should be registered");
                 Assert.Equal("test-plugin", registeredExtId);
                 Assert.NotNull(receivedManifest);
-                Assert.Single(receivedManifest.Value.Commands);
-                Assert.Equal("test.command", receivedManifest.Value.Commands[0].Id);
-                Assert.Single(receivedManifest.Value.MenuItems);
-                Assert.Equal("Tools/Test Command", receivedManifest.Value.MenuItems[0].MenuPath);
-                Assert.Single(receivedManifest.Value.Panels);
-                Assert.Equal("test.panel", receivedManifest.Value.Panels[0].Id);
-                Assert.Single(receivedManifest.Value.Settings);
-                Assert.Equal("test-plugin.fontSize", receivedManifest.Value.Settings[0].Id);
-                Assert.Equal("Test Plugin Font Size", receivedManifest.Value.Settings[0].DisplayName);
-                Assert.Equal("integer", receivedManifest.Value.Settings[0].Type);
-                Assert.Equal("16", receivedManifest.Value.Settings[0].DefaultValue);
+                Assert.Single(receivedManifest.Commands);
+                Assert.Equal("test.command", receivedManifest.Commands[0].Id);
+                Assert.Single(receivedManifest.MenuItems);
+                Assert.Equal("Tools/Test Command", receivedManifest.MenuItems[0].MenuPath);
+                Assert.Single(receivedManifest.Panels);
+                Assert.Equal("test.panel", receivedManifest.Panels[0].Id);
+                Assert.Single(receivedManifest.Settings);
+                Assert.Equal("test-plugin.fontSize", receivedManifest.Settings[0].Id);
+                Assert.Equal("Test Plugin Font Size", receivedManifest.Settings[0].DisplayName);
+                Assert.Equal("integer", receivedManifest.Settings[0].Type);
+                Assert.Equal("16", receivedManifest.Settings[0].DefaultValue);
 
                 // Simulate host invoking command
                 var commandReceiveTask = Task.Run(async () =>
@@ -573,8 +573,8 @@ namespace SpanCoder.Tests
                 Assert.True(registered, "Extension should be registered");
                 Assert.Equal("prettier-extension", registeredExtId);
                 Assert.NotNull(receivedManifest);
-                Assert.Equal(2, receivedManifest.Value.Formatters.Count);
-                Assert.Equal(".js", receivedManifest.Value.Formatters[0]);
+                Assert.Equal(2, receivedManifest.Formatters.Count);
+                Assert.Equal(".js", receivedManifest.Formatters[0]);
 
                 // Start mock extension message processing loop
                 var clientLoopTask = Task.Run(async () =>

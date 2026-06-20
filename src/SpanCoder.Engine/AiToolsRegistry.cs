@@ -167,8 +167,22 @@ namespace SpanCoder.Engine
 
         private static string GetFullPath(string path)
         {
-            if (Path.IsPathRooted(path)) return path;
-            return Path.GetFullPath(Path.Combine(WorkspaceRoot, path));
+            string fullPath = Path.IsPathRooted(path)
+                ? Path.GetFullPath(path)
+                : Path.GetFullPath(Path.Combine(WorkspaceRoot, path));
+
+            string requiredPrefix = WorkspaceRoot;
+            if (!requiredPrefix.EndsWith(Path.DirectorySeparatorChar))
+            {
+                requiredPrefix += Path.DirectorySeparatorChar;
+            }
+
+            if (!fullPath.Equals(WorkspaceRoot, StringComparison.OrdinalIgnoreCase) && 
+                !fullPath.StartsWith(requiredPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException($"Access denied: Path '{path}' resolves to '{fullPath}', which is outside the workspace root '{WorkspaceRoot}'.");
+            }
+            return fullPath;
         }
 
         private static string ExecuteReadFile(JsonElement args)
@@ -176,14 +190,14 @@ namespace SpanCoder.Engine
             if (!args.TryGetProperty("path", out var pathProp) || pathProp.GetString() is not string path)
                 return "Error: Missing parameter 'path'";
 
-            string fullPath = GetFullPath(path);
-            if (!File.Exists(fullPath)) return $"Error: File not found at '{fullPath}'";
-
-            if (IsBinaryFile(fullPath))
-                return $"Error: File '{path}' appears to be a binary file. Reading binary files is not supported.";
-
             try
             {
+                string fullPath = GetFullPath(path);
+                if (!File.Exists(fullPath)) return $"Error: File not found at '{fullPath}'";
+
+                if (IsBinaryFile(fullPath))
+                    return $"Error: File '{path}' appears to be a binary file. Reading binary files is not supported.";
+
                 string[] lines = File.ReadAllLines(fullPath);
                 int startLine = args.TryGetProperty("startLine", out var sProp) ? sProp.GetInt32() : 1;
                 int endLine = args.TryGetProperty("endLine", out var eProp) ? eProp.GetInt32() : lines.Length;
@@ -216,9 +230,9 @@ namespace SpanCoder.Engine
             if (!args.TryGetProperty("content", out var contentProp) || contentProp.GetString() is not string content)
                 return "Error: Missing parameter 'content'";
 
-            string fullPath = GetFullPath(path);
             try
             {
+                string fullPath = GetFullPath(path);
                 string? dir = Path.GetDirectoryName(fullPath);
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 {
@@ -242,14 +256,14 @@ namespace SpanCoder.Engine
             if (!args.TryGetProperty("replacement", out var replacementProp) || replacementProp.GetString() is not string replacement)
                 return "Error: Missing parameter 'replacement'";
 
-            string fullPath = GetFullPath(path);
-            if (!File.Exists(fullPath)) return $"Error: File not found at '{fullPath}'";
-
-            if (IsBinaryFile(fullPath))
-                return $"Error: File '{path}' appears to be a binary file. Editing binary files is not supported.";
-
             try
             {
+                string fullPath = GetFullPath(path);
+                if (!File.Exists(fullPath)) return $"Error: File not found at '{fullPath}'";
+
+                if (IsBinaryFile(fullPath))
+                    return $"Error: File '{path}' appears to be a binary file. Editing binary files is not supported.";
+
                 string content = File.ReadAllText(fullPath);
                 
                 // Count occurrences

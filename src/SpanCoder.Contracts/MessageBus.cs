@@ -50,6 +50,7 @@ namespace SpanCoder.Contracts
         public const byte FormatDocumentRequest = 43;
         public const byte FormatDocumentResponse = 44;
         public const byte ExecuteExtensionCommandWithContext = 45;
+        public const byte AiToolApproval = 46;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]

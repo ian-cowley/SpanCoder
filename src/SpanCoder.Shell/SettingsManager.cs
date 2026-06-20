@@ -9,6 +9,8 @@ namespace SpanCoder.Shell
     public static class SettingsManager
     {
         private static readonly string SettingsFilePath = GetDefaultSettingsFilePath();
+        private static readonly bool IsRunningInUnitTestCached = DetermineIfRunningInUnitTest();
+        private static readonly object LockObj = new();
 
         private static string GetDefaultSettingsFilePath()
         {
@@ -23,7 +25,7 @@ namespace SpanCoder.Shell
             );
         }
 
-        private static bool IsRunningInUnitTest()
+        private static bool DetermineIfRunningInUnitTest()
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -37,6 +39,8 @@ namespace SpanCoder.Shell
             }
             return false;
         }
+
+        private static bool IsRunningInUnitTest() => IsRunningInUnitTestCached;
 
         private static readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, SettingDescriptor> _descriptors = new(StringComparer.OrdinalIgnoreCase);
@@ -80,58 +84,76 @@ namespace SpanCoder.Shell
 
         private static void RegisterBuiltIn(string id, string displayName, string type, string defaultValue)
         {
-            var desc = new SettingDescriptor(id, displayName, type, defaultValue);
-            _descriptors[id] = desc;
-            _values[id] = defaultValue;
+            lock (LockObj)
+            {
+                var desc = new SettingDescriptor(id, displayName, type, defaultValue);
+                _descriptors[id] = desc;
+                _values[id] = defaultValue;
+            }
         }
 
         public static void RegisterExtensionSetting(SettingDescriptor desc)
         {
-            _descriptors[desc.Id] = desc;
-            if (!_values.ContainsKey(desc.Id))
+            lock (LockObj)
             {
-                _values[desc.Id] = desc.DefaultValue;
+                _descriptors[desc.Id] = desc;
+                if (!_values.ContainsKey(desc.Id))
+                {
+                    _values[desc.Id] = desc.DefaultValue;
+                }
             }
         }
 
         public static void UnregisterExtensionSettings(string extensionId)
         {
-            var descriptorsToRemove = new List<string>();
-            foreach (var key in _descriptors.Keys)
+            lock (LockObj)
             {
-                if (key.StartsWith(extensionId + ".", StringComparison.OrdinalIgnoreCase))
+                var descriptorsToRemove = new List<string>();
+                foreach (var key in _descriptors.Keys)
                 {
-                    descriptorsToRemove.Add(key);
+                    if (key.StartsWith(extensionId + ".", StringComparison.OrdinalIgnoreCase))
+                    {
+                        descriptorsToRemove.Add(key);
+                    }
                 }
-            }
-            foreach (var key in descriptorsToRemove)
-            {
-                _descriptors.Remove(key);
-            }
+                foreach (var key in descriptorsToRemove)
+                {
+                    _descriptors.Remove(key);
+                }
 
-            var valuesToRemove = new List<string>();
-            foreach (var key in _values.Keys)
-            {
-                if (key.StartsWith(extensionId + ".", StringComparison.OrdinalIgnoreCase))
+                var valuesToRemove = new List<string>();
+                foreach (var key in _values.Keys)
                 {
-                    valuesToRemove.Add(key);
+                    if (key.StartsWith(extensionId + ".", StringComparison.OrdinalIgnoreCase))
+                    {
+                        valuesToRemove.Add(key);
+                    }
                 }
-            }
-            foreach (var key in valuesToRemove)
-            {
-                _values.Remove(key);
+                foreach (var key in valuesToRemove)
+                {
+                    _values.Remove(key);
+                }
             }
 
             Save();
         }
 
-        public static IEnumerable<SettingDescriptor> GetDescriptors() => _descriptors.Values;
+        public static IEnumerable<SettingDescriptor> GetDescriptors()
+        {
+            lock (LockObj)
+            {
+                return new List<SettingDescriptor>(_descriptors.Values);
+            }
+        }
 
         public static string Get(string id)
         {
             string val = "";
-            if (_values.TryGetValue(id, out var v)) val = v;
-            else if (_descriptors.TryGetValue(id, out var desc)) val = desc.DefaultValue;
+            lock (LockObj)
+            {
+                if (_values.TryGetValue(id, out var v)) val = v;
+                else if (_descriptors.TryGetValue(id, out var desc)) val = desc.DefaultValue;
+            }
 
             if (id.EndsWith(".apikey", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(val))
             {
@@ -156,13 +178,16 @@ namespace SpanCoder.Shell
 
         public static void Set(string id, string value)
         {
-            if (id.EndsWith(".apikey", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(value))
+            lock (LockObj)
             {
-                _values[id] = DpapiHelper.Encrypt(value);
-            }
-            else
-            {
-                _values[id] = value;
+                if (id.EndsWith(".apikey", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(value))
+                {
+                    _values[id] = DpapiHelper.Encrypt(value);
+                }
+                else
+                {
+                    _values[id] = value;
+                }
             }
             Save();
             SettingChanged?.Invoke(id);
@@ -175,9 +200,12 @@ namespace SpanCoder.Shell
                 if (!File.Exists(SettingsFilePath)) return;
                 string json = File.ReadAllText(SettingsFilePath);
                 using var doc = JsonDocument.Parse(json);
-                foreach (var prop in doc.RootElement.EnumerateObject())
+                lock (LockObj)
                 {
-                    _values[prop.Name] = prop.Value.ToString();
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                    {
+                        _values[prop.Name] = prop.Value.ToString();
+                    }
                 }
             }
             catch (Exception ex)
@@ -200,9 +228,12 @@ namespace SpanCoder.Shell
                 using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
                 {
                     writer.WriteStartObject();
-                    foreach (var kvp in _values)
+                    lock (LockObj)
                     {
-                        writer.WriteString(kvp.Key, kvp.Value);
+                        foreach (var kvp in _values)
+                        {
+                            writer.WriteString(kvp.Key, kvp.Value);
+                        }
                     }
                     writer.WriteEndObject();
                 }

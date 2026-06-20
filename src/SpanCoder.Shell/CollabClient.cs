@@ -11,7 +11,7 @@ namespace SpanCoder.Shell
 {
     public class CollabClient : IDisposable
     {
-        private ClientWebSocket? _webSocket;
+        private WebSocket? _webSocket;
         private CancellationTokenSource _cts = new();
         private CrdtDocument? _crdtDoc;
         private readonly string _username;
@@ -37,13 +37,14 @@ namespace SpanCoder.Shell
 
         public async Task ConnectAsync(string ipAddress, int port)
         {
-            _webSocket = new ClientWebSocket();
+            var ws = new ClientWebSocket();
             _crdtDoc = new CrdtDocument(_clientId);
             _cts = new CancellationTokenSource();
 
             var uri = new Uri($"ws://{ipAddress}:{port}/collab/");
             Console.WriteLine($"[CollabClient] Connecting to {uri}...");
-            await _webSocket.ConnectAsync(uri, _cts.Token);
+            await ws.ConnectAsync(uri, _cts.Token);
+            _webSocket = ws;
             _isConnected = true;
             Console.WriteLine("[CollabClient] Connected successfully.");
 
@@ -158,6 +159,8 @@ namespace SpanCoder.Shell
         private async Task ReadLoop()
         {
             byte[] buffer = new byte[65536];
+            using var ms = new MemoryStream();
+
             while (_isConnected && _webSocket != null && _webSocket.State == WebSocketState.Open && !_cts.Token.IsCancellationRequested)
             {
                 try
@@ -168,13 +171,30 @@ namespace SpanCoder.Shell
                         break;
                     }
 
-                    if (result.MessageType == WebSocketMessageType.Text)
+                    if (result.MessageType == WebSocketMessageType.Text || result.MessageType == WebSocketMessageType.Binary)
                     {
-                        string messageStr = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        var payload = JsonSerializer.Deserialize(messageStr, CollabJsonContext.Default.CollabPayload);
-                        if (payload != null)
+                        ms.Write(buffer, 0, result.Count);
+
+                        if (result.EndOfMessage)
                         {
-                            ProcessServerPayload(payload);
+                            ms.Position = 0;
+                            CollabPayload? payload = null;
+
+                            if (ms.TryGetBuffer(out var segment))
+                            {
+                                payload = JsonSerializer.Deserialize(segment.AsSpan(), CollabJsonContext.Default.CollabPayload);
+                            }
+                            else
+                            {
+                                payload = JsonSerializer.Deserialize(ms.ToArray(), CollabJsonContext.Default.CollabPayload);
+                            }
+
+                            if (payload != null)
+                            {
+                                ProcessServerPayload(payload);
+                            }
+
+                            ms.SetLength(0); // Clear for next message
                         }
                     }
                 }

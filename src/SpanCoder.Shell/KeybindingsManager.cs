@@ -42,7 +42,9 @@ namespace SpanCoder.Shell
             );
         }
 
-        private static bool IsRunningInUnitTest()
+        private static readonly bool IsRunningInUnitTestCached = DetermineIfRunningInUnitTest();
+
+        private static bool DetermineIfRunningInUnitTest()
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -56,6 +58,8 @@ namespace SpanCoder.Shell
             }
             return false;
         }
+
+        private static bool IsRunningInUnitTest() => IsRunningInUnitTestCached;
 
         public static string GetShortcut(string commandId, string defaultShortcut)
         {

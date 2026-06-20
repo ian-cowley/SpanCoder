@@ -127,6 +127,8 @@ namespace SpanCoder.Contracts
 
         #region Cross-platform AES Fallback
 
+        private static readonly byte[] MagicHeader = new byte[] { 0x53, 0x50, 0x4E, 0x01 }; // "SPN" + version 1
+
         private static byte[] GetFallbackKey()
         {
             string machine = Environment.MachineName;
@@ -137,7 +139,7 @@ namespace SpanCoder.Contracts
 
         private static byte[] GetFallbackIv()
         {
-            return Encoding.UTF8.GetBytes("SpanCoderIV12345"); // 16 bytes
+            return Encoding.UTF8.GetBytes("SpanCoderIV12345"); // Legacy fallback static IV
         }
 
         private static string EncryptFallback(string plainText)
@@ -146,9 +148,15 @@ namespace SpanCoder.Contracts
             {
                 using var aes = Aes.Create();
                 aes.Key = GetFallbackKey();
-                aes.IV = GetFallbackIv();
+                
+                byte[] iv = new byte[16];
+                RandomNumberGenerator.Fill(iv);
+                aes.IV = iv;
 
                 using var ms = new MemoryStream();
+                ms.Write(MagicHeader, 0, MagicHeader.Length); // Write magic header
+                ms.Write(iv, 0, 16); // Prepend the random IV
+                
                 using (var cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
                 {
                     byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
@@ -168,16 +176,51 @@ namespace SpanCoder.Contracts
             try
             {
                 byte[] cipherBytes = Convert.FromBase64String(cipherText);
-                using var aes = Aes.Create();
-                aes.Key = GetFallbackKey();
-                aes.IV = GetFallbackIv();
 
-                using var ms = new MemoryStream();
-                using (var cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Write))
+                // Check if it starts with MagicHeader
+                bool hasMagic = cipherBytes.Length >= MagicHeader.Length + 16;
+                if (hasMagic)
                 {
-                    cs.Write(cipherBytes, 0, cipherBytes.Length);
+                    for (int i = 0; i < MagicHeader.Length; i++)
+                    {
+                        if (cipherBytes[i] != MagicHeader[i])
+                        {
+                            hasMagic = false;
+                            break;
+                        }
+                    }
                 }
-                return Encoding.UTF8.GetString(ms.ToArray());
+
+                if (hasMagic)
+                {
+                    byte[] iv = new byte[16];
+                    Buffer.BlockCopy(cipherBytes, MagicHeader.Length, iv, 0, 16);
+
+                    using var aes = Aes.Create();
+                    aes.Key = GetFallbackKey();
+                    aes.IV = iv;
+
+                    using var ms = new MemoryStream();
+                    using (var cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Write))
+                    {
+                        cs.Write(cipherBytes, MagicHeader.Length + 16, cipherBytes.Length - (MagicHeader.Length + 16));
+                    }
+                    return Encoding.UTF8.GetString(ms.ToArray());
+                }
+                else
+                {
+                    // Fallback to legacy static IV for backward compatibility
+                    using var aes = Aes.Create();
+                    aes.Key = GetFallbackKey();
+                    aes.IV = GetFallbackIv();
+
+                    using var ms = new MemoryStream();
+                    using (var cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Write))
+                    {
+                        cs.Write(cipherBytes, 0, cipherBytes.Length);
+                    }
+                    return Encoding.UTF8.GetString(ms.ToArray());
+                }
             }
             catch
             {

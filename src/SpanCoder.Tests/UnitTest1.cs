@@ -998,9 +998,9 @@ EndGlobal";
 
         Assert.True(registered, "Languages extension plugin should connect and register itself successfully.");
         Assert.NotNull(receivedManifest);
-        Assert.Equal("languages-extension", receivedManifest.Value.Id);
+        Assert.Equal("languages-extension", receivedManifest.Id);
         
-        var languages = receivedManifest.Value.Languages;
+        var languages = receivedManifest.Languages;
         Assert.Equal(9, languages.Count);
         Assert.Contains(languages, l => l.Extension == ".py");
         Assert.Contains(languages, l => l.Extension == ".cpp");
@@ -1012,7 +1012,7 @@ EndGlobal";
         Assert.Contains(languages, l => l.Extension == ".hpp");
         Assert.Contains(languages, l => l.Extension == ".java");
 
-        var toolbarItems = receivedManifest.Value.ToolbarItems;
+        var toolbarItems = receivedManifest.ToolbarItems;
         Assert.Equal(2, toolbarItems.Count);
         Assert.Contains(toolbarItems, t => t.CommandId == "languages.runPython");
         Assert.Contains(toolbarItems, t => t.CommandId == "languages.cargoBuild");

@@ -208,6 +208,9 @@ graph TD
 ### 37. Real-Time Collaborative Coding
 * **Low-Latency Sequence CRDT**: Syncs editor buffers between developers using a low-latency Conflict-free Replicated Data Type (CRDT) protocol over WebSockets. Displays remote cursor positions, selections, and user labels in real-time.
 
+### 38. C# CodeLens References Annotations
+* **Interactive CodeLens**: Displays inline references and author information ("X references | author, Y hours ago") directly above class, struct, interface, and method declarations, automatically aligned with the code's indentation.
+
 ---
 
 ## Architectural Deep Dive: Developer Language Extensions

@@ -33,4 +33,10 @@ namespace SpanCoder.Contracts
         public string Status { get; set; } = ""; // "running", "completed", "failed"
         public string Output { get; set; } = "";
     }
+
+    public class ToolApprovalMessage
+    {
+        public string ToolCallId { get; set; } = "";
+        public bool Approved { get; set; }
+    }
 }

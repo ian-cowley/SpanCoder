@@ -2081,13 +2081,18 @@ namespace SpanCoder.Shell
             }
         }
 
-        private void OnEngineMessage(byte[] payload)
+        private void OnEngineMessage(byte[] rawPayload)
         {
+            if (!BinaryMessageSerializer.TryParseHeader(rawPayload, out var header)) return;
+
+            byte[] payload = new byte[header.Length];
+            Array.Copy(rawPayload, 0, payload, 0, header.Length);
+
             Dispatcher.UIThread.Post(() =>
             {
-                if (BinaryMessageSerializer.TryParseHeader(payload, out var header))
+                if (BinaryMessageSerializer.TryParseHeader(payload, out var innerHeader))
                 {
-                    LogHelper.Log($"[ShellWindow] OnEngineMessage received: Type={header.Type}, DocumentId={header.DocumentId}, Length={header.Length}");
+                    LogHelper.Log($"[ShellWindow] OnEngineMessage received: Type={innerHeader.Type}, DocumentId={innerHeader.DocumentId}, Length={innerHeader.Length}");
                     if (header.Type == MessageTypes.DocumentChanged)
                     {
                         BinaryMessageSerializer.ParseDocumentChanged(payload, out int docId, out int offset, out int addedLength, out int deletedLength);
@@ -4419,7 +4424,9 @@ namespace SpanCoder.Shell
             });
         }
 
-        private static bool IsRunningInUnitTest()
+        private static readonly bool IsRunningInUnitTestCached = DetermineIfRunningInUnitTest();
+
+        private static bool DetermineIfRunningInUnitTest()
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -4433,6 +4440,8 @@ namespace SpanCoder.Shell
             }
             return false;
         }
+
+        private static bool IsRunningInUnitTest() => IsRunningInUnitTestCached;
 
         private void ResetGhostTextTimer()
         {
@@ -5537,7 +5546,35 @@ namespace SpanCoder.Shell
                 if (rented != null) System.Buffers.ArrayPool<char>.Shared.Return(rented);
 
                 // CodeLens for declarations
-                if (lineText.Contains("class ") || lineText.Contains("struct ") || lineText.Contains("interface ") || lineText.Contains("public void ") || lineText.Contains("private void "))
+                string trimmed = lineText.Trim();
+                bool isDecl = false;
+                if (!trimmed.StartsWith("//") && !trimmed.StartsWith("/*") && !trimmed.StartsWith("*"))
+                {
+                    if (trimmed.Contains("class ") || trimmed.Contains("struct ") || trimmed.Contains("interface ") || trimmed.Contains("enum "))
+                    {
+                        if (trimmed.StartsWith("public ") || trimmed.StartsWith("private ") || trimmed.StartsWith("protected ") || trimmed.StartsWith("internal ") ||
+                            trimmed.StartsWith("static ") || trimmed.StartsWith("partial ") || trimmed.StartsWith("class ") || trimmed.StartsWith("struct ") ||
+                            trimmed.StartsWith("interface ") || trimmed.StartsWith("enum "))
+                        {
+                            isDecl = true;
+                        }
+                    }
+                    else if ((trimmed.Contains(" void ") || trimmed.Contains("Task ") || trimmed.Contains("bool ") || trimmed.Contains("int ") || trimmed.Contains("string ") || trimmed.Contains("double ")) && trimmed.Contains("("))
+                    {
+                        if (trimmed.StartsWith("public ") || trimmed.StartsWith("private ") || trimmed.StartsWith("protected ") || trimmed.StartsWith("internal ") ||
+                            trimmed.StartsWith("static ") || trimmed.StartsWith("async ") || trimmed.StartsWith("virtual ") || trimmed.StartsWith("override ") ||
+                            trimmed.StartsWith("void "))
+                        {
+                            if (!trimmed.StartsWith("if ") && !trimmed.StartsWith("for ") && !trimmed.StartsWith("foreach ") && !trimmed.StartsWith("while ") &&
+                                !trimmed.Contains("=") && !trimmed.Contains(";") && !trimmed.Contains("return ") && !trimmed.Contains("new ") && !trimmed.Contains("\""))
+                            {
+                                isDecl = true;
+                            }
+                        }
+                    }
+                }
+
+                if (isDecl)
                 {
                     int refCount = (i % 3) + 1;
                     codeLens[i + 1] = $"{refCount} references | spuri, {i + 1} hours ago";

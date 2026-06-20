@@ -901,6 +901,13 @@ namespace SpanCoder.Engine
                         _aiCoordinator.StopActiveRequest();
                         break;
                     }
+
+                case MessageTypes.AiToolApproval:
+                    {
+                        string approvalJson = BinaryMessageSerializer.ParseStringPayload(message);
+                        _aiCoordinator.HandleToolApproval(approvalJson);
+                        break;
+                    }
             }
         }
 

@@ -1809,9 +1809,23 @@ namespace SpanCoder.Shell
                     context.FillRectangle(new SolidColorBrush(Color.FromArgb(40, 255, 255, 0)), new Rect(gutterWidth, yOffset, Bounds.Width - gutterWidth, LineHeight));
                 }
 
+                var lineSpan = doc!.GetLine(i, out bool isContiguous, out var rented);
+
+                // Strip trailing CR/LF for rendering
+                int renderLen = lineSpan.Length;
+                if (renderLen > 0 && lineSpan[renderLen - 1] == '\n') renderLen--;
+                if (renderLen > 0 && lineSpan[renderLen - 1] == '\r') renderLen--;
+
                 // Draw CodeLens if exists
                 if (_codeLensItems.TryGetValue(i + 1, out var lensText))
                 {
+                    int indentSpaces = 0;
+                    while (indentSpaces < lineSpan.Length && char.IsWhiteSpace(lineSpan[indentSpaces]))
+                    {
+                        indentSpaces++;
+                    }
+                    double indentOffset = indentSpaces * CharWidth;
+
                     var formattedLens = new FormattedText(
                         lensText,
                         CultureInfo.InvariantCulture,
@@ -1820,7 +1834,7 @@ namespace SpanCoder.Shell
                         10.0,
                         new SolidColorBrush(Color.Parse("#858585"))
                     );
-                    context.DrawText(formattedLens, new Point(gutterWidth + 10 - ScrollX, yOffset - 12));
+                    context.DrawText(formattedLens, new Point(gutterWidth + 10 + indentOffset - ScrollX, yOffset - 12));
                 }
 
                 // Draw Inlay Hints for this line
@@ -1855,13 +1869,6 @@ namespace SpanCoder.Shell
                     );
                     context.DrawText(formattedHint, new Point(hintX + 2, yOffset - 8));
                 }
-
-                var lineSpan = doc!.GetLine(i, out bool isContiguous, out var rented);
-
-                // Strip trailing CR/LF for rendering
-                int renderLen = lineSpan.Length;
-                if (renderLen > 0 && lineSpan[renderLen - 1] == '\n') renderLen--;
-                if (renderLen > 0 && lineSpan[renderLen - 1] == '\r') renderLen--;
 
                 // --- Draw Search Highlights ---
                 for (int matchIdx = 0; matchIdx < _searchMatches.Count; matchIdx++)

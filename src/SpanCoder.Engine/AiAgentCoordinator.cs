@@ -16,6 +16,7 @@ namespace SpanCoder.Engine
         private readonly Action<byte[]> _sendResponse;
         private CancellationTokenSource? _activeCts;
         private readonly object _lock = new();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<bool>> _pendingApprovals = new();
 
         public AiAgentCoordinator(Action<byte[]> sendResponse)
         {
@@ -28,8 +29,18 @@ namespace SpanCoder.Engine
             lock (_lock)
             {
                 // Abort any active loop
-                _activeCts?.Cancel();
+                if (_activeCts != null)
+                {
+                    _activeCts.Cancel();
+                    _activeCts.Dispose();
+                }
                 _activeCts = new CancellationTokenSource();
+
+                foreach (var tcs in _pendingApprovals.Values)
+                {
+                    tcs.TrySetResult(false);
+                }
+                _pendingApprovals.Clear();
 
                 Task.Run(() => RunAgentLoopAsync(requestJson, _activeCts.Token));
             }
@@ -39,9 +50,35 @@ namespace SpanCoder.Engine
         {
             lock (_lock)
             {
-                _activeCts?.Cancel();
-                _activeCts = null;
+                if (_activeCts != null)
+                {
+                    _activeCts.Cancel();
+                    _activeCts.Dispose();
+                    _activeCts = null;
+                }
                 Console.WriteLine("[AiAgentCoordinator] Stop requested. Agent loop terminated.");
+
+                foreach (var tcs in _pendingApprovals.Values)
+                {
+                    tcs.TrySetResult(false);
+                }
+                _pendingApprovals.Clear();
+            }
+        }
+
+        public void HandleToolApproval(string json)
+        {
+            try
+            {
+                var msg = JsonSerializer.Deserialize<ToolApprovalMessage>(json, ContractsJsonContext.Default.ToolApprovalMessage);
+                if (msg != null && _pendingApprovals.TryGetValue(msg.ToolCallId, out var tcs))
+                {
+                    tcs.TrySetResult(msg.Approved);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AiAgentCoordinator] Error handling tool approval: {ex.Message}");
             }
         }
 
@@ -145,12 +182,49 @@ namespace SpanCoder.Engine
                             string args = toolCall.Function.Arguments;
 
                             Console.WriteLine($"[AiAgent] Executing tool '{toolName}' with arguments: {args}");
-                            SendToolProgress(toolCall.Id, toolName, "running", $"Executing {toolName}...");
 
                             // Run tool
-                            string toolOutput = await AiToolsRegistry.ExecuteToolAsync(toolName, args);
+                            string toolOutput;
+                            if (toolName == "execute_terminal_command" && !request.YoloMode)
+                            {
+                                var tcs = new TaskCompletionSource<bool>();
+                                _pendingApprovals[toolCall.Id] = tcs;
 
-                            SendToolProgress(toolCall.Id, toolName, "completed", toolOutput);
+                                SendToolProgress(toolCall.Id, toolName, "pending_approval", $"Command requires approval: {args}");
+
+                                bool approved = false;
+                                try
+                                {
+                                    approved = await tcs.Task;
+                                }
+                                finally
+                                {
+                                    _pendingApprovals.TryRemove(toolCall.Id, out _);
+                                }
+
+                                if (approved)
+                                {
+                                    SendToolProgress(toolCall.Id, toolName, "running", $"Executing {toolName}...");
+                                    toolOutput = await AiToolsRegistry.ExecuteToolAsync(toolName, args);
+                                }
+                                else
+                                {
+                                    toolOutput = "Error: Execution rejected by the user.";
+                                }
+                            }
+                            else
+                            {
+                                toolOutput = await AiToolsRegistry.ExecuteToolAsync(toolName, args);
+                            }
+
+                            if (toolOutput.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+                            {
+                                SendToolProgress(toolCall.Id, toolName, "failed", toolOutput);
+                            }
+                            else
+                            {
+                                SendToolProgress(toolCall.Id, toolName, "completed", toolOutput);
+                            }
 
                             // Append tool output message to context
                             messages.Add(new LlmRequestMessage
@@ -222,7 +296,9 @@ namespace SpanCoder.Engine
             return Path.Combine(appData, "SpanCoder", "settings.json");
         }
 
-        private bool IsRunningInUnitTest()
+        private static readonly bool IsRunningInUnitTestCached = DetermineIfRunningInUnitTest();
+
+        private static bool DetermineIfRunningInUnitTest()
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -236,6 +312,8 @@ namespace SpanCoder.Engine
             }
             return false;
         }
+
+        private bool IsRunningInUnitTest() => IsRunningInUnitTestCached;
 
         private string GetSystemPrompt(bool yoloMode)
         {
@@ -317,6 +395,7 @@ namespace SpanCoder.Engine
     [JsonSerializable(typeof(AiToolExecutionEvent))]
     [JsonSerializable(typeof(AiMessage))]
     [JsonSerializable(typeof(List<AiMessage>))]
+    [JsonSerializable(typeof(ToolApprovalMessage))]
     public partial class ContractsJsonContext : JsonSerializerContext
     {
     }

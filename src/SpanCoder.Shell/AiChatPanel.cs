@@ -296,12 +296,72 @@ namespace SpanCoder.Shell
                         tool.IsExpanded = !tool.IsExpanded;
                     };
 
+                    // Tool Approval Panel
+                    var approvePanel = new StackPanel
+                    {
+                        Orientation = Orientation.Vertical,
+                        Spacing = 4,
+                        Margin = new Thickness(0, 6, 0, 0),
+                        IsVisible = tool.Status.Equals("pending_approval", StringComparison.OrdinalIgnoreCase)
+                    };
+
+                    var promptText = new TextBlock
+                    {
+                        Text = "🛡️ Confirm command execution:",
+                        FontSize = 10,
+                        Foreground = new SolidColorBrush(Color.Parse("#AAAAAA")),
+                        Margin = new Thickness(0, 0, 0, 4)
+                    };
+                    approvePanel.Children.Add(promptText);
+
+                    var buttonRow = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8
+                    };
+
+                    var btnApprove = new Button
+                    {
+                        Content = "Approve",
+                        Background = new SolidColorBrush(Color.Parse("#2E7D32")),
+                        Foreground = Brushes.White,
+                        FontSize = 10,
+                        Padding = new Thickness(10, 4),
+                        CornerRadius = new CornerRadius(3)
+                    };
+                    btnApprove.Click += (s, e) =>
+                    {
+                        tool.Status = "running";
+                        ApproveTool(tool.Arguments, true);
+                    };
+                    buttonRow.Children.Add(btnApprove);
+
+                    var btnReject = new Button
+                    {
+                        Content = "Reject",
+                        Background = new SolidColorBrush(Color.Parse("#C62828")),
+                        Foreground = Brushes.White,
+                        FontSize = 10,
+                        Padding = new Thickness(10, 4),
+                        CornerRadius = new CornerRadius(3)
+                    };
+                    btnReject.Click += (s, e) =>
+                    {
+                        tool.Status = "failed";
+                        tool.Output = "Error: Execution rejected by the user.";
+                        ApproveTool(tool.Arguments, false);
+                    };
+                    buttonRow.Children.Add(btnReject);
+
+                    approvePanel.Children.Add(buttonRow);
+
                     tool.PropertyChanged += (s, e) =>
                     {
                         if (e.PropertyName == nameof(ToolExecutionItem.Status))
                         {
                             status.Text = tool.StatusText;
                             status.Foreground = tool.StatusColor;
+                            approvePanel.IsVisible = tool.Status.Equals("pending_approval", StringComparison.OrdinalIgnoreCase);
                         }
                         else if (e.PropertyName == nameof(ToolExecutionItem.Output))
                         {
@@ -320,6 +380,7 @@ namespace SpanCoder.Shell
                     var stack = new StackPanel();
                     stack.Children.Add(headerGrid);
                     stack.Children.Add(outputScroll);
+                    stack.Children.Add(approvePanel);
 
                     var border = new Border
                     {
@@ -785,6 +846,27 @@ namespace SpanCoder.Shell
             });
         }
 
+        public void ApproveTool(string toolCallId, bool approve)
+        {
+            try
+            {
+                var msg = new ToolApprovalMessage { ToolCallId = toolCallId, Approved = approve };
+                string json = JsonSerializer.Serialize(msg, LocalContractsJsonContext.Default.ToolApprovalMessage);
+                
+                byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 8 + json.Length * sizeof(char)];
+                int len = BinaryMessageSerializer.WriteStringPayload(buffer, MessageTypes.AiToolApproval, json);
+                
+                byte[] finalBuffer = new byte[len];
+                Array.Copy(buffer, 0, finalBuffer, 0, len);
+                
+                _engine?.Send(finalBuffer);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AiChatPanel] Error sending tool approval: {ex.Message}");
+            }
+        }
+
         private void ScrollToEnd()
         {
             Dispatcher.UIThread.Post(() => _chatScrollViewer.ScrollToEnd(), DispatcherPriority.Background);
@@ -1082,6 +1164,7 @@ namespace SpanCoder.Shell
     [JsonSerializable(typeof(AiToolExecutionEvent))]
     [JsonSerializable(typeof(AiMessage))]
     [JsonSerializable(typeof(List<AiMessage>))]
+    [JsonSerializable(typeof(ToolApprovalMessage))]
     public partial class LocalContractsJsonContext : JsonSerializerContext
     {
     }

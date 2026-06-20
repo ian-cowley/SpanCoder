@@ -155,7 +155,7 @@ namespace SpanCoder.Contracts
         int OrderPriority
     );
 
-    public struct ExtensionManifest
+    public class ExtensionManifest
     {
         public string Id { get; }
         public System.Collections.Generic.List<CommandDescriptor> Commands { get; }

@@ -40,7 +40,7 @@ namespace SpanCoder.App
         private readonly ConcurrentDictionary<string, int> _pathToOldIdMap = new();
         private readonly ConcurrentDictionary<int, int> _oldToNewIdMap = new();
         private readonly ConcurrentQueue<string> _pendingLoadFiles = new();
-        private bool _isRecovering = false;
+        private volatile bool _isRecovering = false;
 
         public event Action<byte[]>? MessageReceived;
 
@@ -257,22 +257,29 @@ namespace SpanCoder.App
                     }
 
                     int messageLength = header.Length;
-                    byte[] fullMessage = new byte[messageLength];
-                    Array.Copy(headerBuffer, 0, fullMessage, 0, headerBuffer.Length);
-
-                    if (messageLength > headerBuffer.Length)
+                    byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(messageLength);
+                    try
                     {
-                        ReadExactly(_stream, fullMessage, headerBuffer.Length, messageLength - headerBuffer.Length);
+                        Array.Copy(headerBuffer, 0, rented, 0, headerBuffer.Length);
+
+                        if (messageLength > headerBuffer.Length)
+                        {
+                            ReadExactly(_stream, rented, headerBuffer.Length, messageLength - headerBuffer.Length);
+                        }
+
+                        // Translate incoming message paths
+                        byte[] translated = TranslateIncomingMessage(rented);
+
+                        // Process incoming message locally (mirroring)
+                        ProcessIncomingMessage(translated);
+
+                        // Dispatch to UI listeners
+                        MessageReceived?.Invoke(translated);
                     }
-
-                    // Translate incoming message paths
-                    fullMessage = TranslateIncomingMessage(fullMessage);
-
-                    // Process incoming message locally (mirroring)
-                    ProcessIncomingMessage(fullMessage);
-
-                    // Dispatch to UI listeners
-                    MessageReceived?.Invoke(fullMessage);
+                    finally
+                    {
+                        System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -676,7 +683,9 @@ namespace SpanCoder.App
             return message;
         }
 
-        private static bool IsRunningInUnitTest()
+        private static readonly bool IsRunningInUnitTestCached = DetermineIfRunningInUnitTest();
+
+        private static bool DetermineIfRunningInUnitTest()
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -690,5 +699,7 @@ namespace SpanCoder.App
             }
             return false;
         }
+
+        private static bool IsRunningInUnitTest() => IsRunningInUnitTestCached;
     }
 }

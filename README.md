@@ -115,7 +115,9 @@ graph TD
 
 ### 16. Embedded Autonomous AI Agent (YOLO Dev)
 * **Out-of-Process Coordination**: Coordinates LLM chat, reasoning, and tool executions (running build/test scripts, reading/writing workspace files, running shell commands) entirely asynchronously in the `SpanCoder.Engine` daemon process.
-* **API Key Encryption (DPAPI)**: Automatically encrypts all API keys using Windows DPAPI (falling back to secure AES on Unix/WSL) before persisting them to `%APPDATA%/SpanCoder/settings.json`.
+* **API Key Encryption (DPAPI)**: Automatically encrypts all API keys using Windows DPAPI before persisting them to `%APPDATA%/SpanCoder/settings.json`. Falls back to secure AES encryption on Unix/WSL, utilizing a cryptographically secure random IV and a magic header to maintain seamless backward compatibility with legacy keys.
+* **Interactive Command Confirmation Gate**: Enforces a strict user-authorization step (dual Approve/Reject buttons) in the UI chat feed when running shell commands via `execute_terminal_command` with YOLO Mode turned off.
+* **Workspace Path Traversal Safeguards**: Protects file tools (`read_file`, `write_file`, `edit_file_replace`) with path validation bounds checking, throwing `UnauthorizedAccessException` and rejecting any operations that resolve outside the workspace root.
 * **Chronological Chat & Sizing**: Streams text tokens and tool steps in the exact chronological order of execution. Uses a non-virtualized scrolling list to prevent text clipping and display log outputs at full height.
 * **Auto-Collapsing Tool Cards**: Automatically collapses tool log boxes when execution finishes, keeping the chat feed neat and scan-friendly while allowing one-click manual expansion.
 * **Native Markdown Rendering**: Upgrades plain text output with dynamic block and inline runs, styling headers, horizontal rules, lists, bold/italics, and custom Consolas block code scrollable boxes.

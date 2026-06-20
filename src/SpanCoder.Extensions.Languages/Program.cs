@@ -75,9 +75,21 @@ namespace SpanCoder.Extensions.Languages
                         await ReadExactlyAsync(stream, payload, headerBuffer.Length, header.Length - headerBuffer.Length);
                     }
 
-                    if (header.Type == MessageTypes.ExecuteExtensionCommand)
+                    if (header.Type == MessageTypes.ExecuteExtensionCommand || header.Type == MessageTypes.ExecuteExtensionCommandWithContext)
                     {
-                        string commandId = BinaryMessageSerializer.ParseExecuteExtensionCommand(payload);
+                        string commandId;
+                        string activeFilePath = "";
+                        string activeContent = "";
+
+                        if (header.Type == MessageTypes.ExecuteExtensionCommandWithContext)
+                        {
+                            BinaryMessageSerializer.ParseExecuteExtensionCommandWithContext(payload, out commandId, out activeFilePath, out activeContent);
+                        }
+                        else
+                        {
+                            commandId = BinaryMessageSerializer.ParseExecuteExtensionCommand(payload);
+                        }
+
                         Console.WriteLine($"[LanguagesPlugin] Received command: {commandId}");
 
                         if (commandId == "languages.runPython")
@@ -87,12 +99,16 @@ namespace SpanCoder.Extensions.Languages
                                 try
                                 {
                                     await UpdateStatusBarAsync(stream, "languages-status", "Py: Running...", "Python script is executing");
-                                    await Task.Delay(1500);
-                                    await UpdateStatusBarAsync(stream, "languages-status", "Py/Cargo: Idle", "Languages extension is ready");
+                                    var result = await RunPythonScriptAsync(activeFilePath, activeContent);
+                                    string text = result.Success ? "Py: Run Success" : "Py: Run Failed";
+                                    string tooltip = result.Output;
+                                    if (tooltip.Length > 500) tooltip = tooltip.Substring(0, 500) + "...";
+                                    await UpdateStatusBarAsync(stream, "languages-status", text, tooltip);
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[LanguagesPlugin] Error updating status bar: {ex.Message}");
+                                    Console.WriteLine($"[LanguagesPlugin] Error running script: {ex.Message}");
+                                    await UpdateStatusBarAsync(stream, "languages-status", "Py: Run Error", ex.Message);
                                 }
                             });
                         }
@@ -103,12 +119,16 @@ namespace SpanCoder.Extensions.Languages
                                 try
                                 {
                                     await UpdateStatusBarAsync(stream, "languages-status", "Cargo: Building...", "Cargo build is executing");
-                                    await Task.Delay(1500);
-                                    await UpdateStatusBarAsync(stream, "languages-status", "Py/Cargo: Idle", "Languages extension is ready");
+                                    var result = await RunCargoBuildAsync(activeFilePath);
+                                    string text = result.Success ? "Cargo: Build Success" : "Cargo: Build Failed";
+                                    string tooltip = result.Output;
+                                    if (tooltip.Length > 500) tooltip = tooltip.Substring(0, 500) + "...";
+                                    await UpdateStatusBarAsync(stream, "languages-status", text, tooltip);
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[LanguagesPlugin] Error updating status bar: {ex.Message}");
+                                    Console.WriteLine($"[LanguagesPlugin] Error running build: {ex.Message}");
+                                    await UpdateStatusBarAsync(stream, "languages-status", "Cargo: Build Error", ex.Message);
                                 }
                             });
                         }
@@ -129,6 +149,137 @@ namespace SpanCoder.Extensions.Languages
                 stream?.Dispose();
                 client?.Dispose();
             }
+        }
+
+        private static async Task<(bool Success, string Output)> RunPythonScriptAsync(string filePath, string content)
+        {
+            string[] executables = { "python", "python3", "py" };
+            Exception? lastException = null;
+
+            foreach (var exe in executables)
+            {
+                try
+                {
+                    bool useStdin = string.IsNullOrEmpty(filePath) || !File.Exists(filePath);
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = exe,
+                        Arguments = useStdin ? "-" : $"\"{filePath}\"",
+                        RedirectStandardInput = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    using (var proc = System.Diagnostics.Process.Start(psi))
+                    {
+                        if (proc != null)
+                        {
+                            if (useStdin)
+                            {
+                                using (var writer = proc.StandardInput)
+                                {
+                                    await writer.WriteAsync(content);
+                                }
+                            }
+                            else
+                            {
+                                proc.StandardInput.Close();
+                            }
+
+                            string stdout = await proc.StandardOutput.ReadToEndAsync();
+                            string stderr = await proc.StandardError.ReadToEndAsync();
+
+                            await proc.WaitForExitAsync();
+
+                            string combined = string.IsNullOrEmpty(stderr) ? stdout : $"{stdout}\nError:\n{stderr}";
+                            if (string.IsNullOrEmpty(combined))
+                            {
+                                combined = "(No output)";
+                            }
+
+                            return (proc.ExitCode == 0, combined);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                }
+            }
+
+            return (false, $"Python executable not found on system PATH. Error: {lastException?.Message}");
+        }
+
+        private static string FindCargoProjectDir(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath)) return "";
+            try
+            {
+                string? dir = Path.GetDirectoryName(filePath);
+                while (!string.IsNullOrEmpty(dir))
+                {
+                    if (File.Exists(Path.Combine(dir, "Cargo.toml")))
+                    {
+                        return dir;
+                    }
+                    dir = Path.GetDirectoryName(dir);
+                }
+            }
+            catch { }
+            return "";
+        }
+
+        private static async Task<(bool Success, string Output)> RunCargoBuildAsync(string filePath)
+        {
+            string workingDir = FindCargoProjectDir(filePath);
+            if (string.IsNullOrEmpty(workingDir))
+            {
+                if (!string.IsNullOrEmpty(filePath))
+                {
+                    workingDir = Path.GetDirectoryName(filePath) ?? "";
+                }
+            }
+
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "cargo",
+                    Arguments = "build",
+                    WorkingDirectory = workingDir,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using (var proc = System.Diagnostics.Process.Start(psi))
+                {
+                    if (proc != null)
+                    {
+                        string stdout = await proc.StandardOutput.ReadToEndAsync();
+                        string stderr = await proc.StandardError.ReadToEndAsync();
+
+                        await proc.WaitForExitAsync();
+
+                        string combined = string.IsNullOrEmpty(stderr) ? stdout : $"{stdout}\nStderr:\n{stderr}";
+                        if (string.IsNullOrEmpty(combined))
+                        {
+                            combined = "(No output)";
+                        }
+
+                        return (proc.ExitCode == 0, combined);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Cargo execution failed. Make sure Rust/Cargo is installed. Error: {ex.Message}");
+            }
+
+            return (false, "Failed to start Cargo process.");
         }
 
         private static async Task SendMessageAsync(NetworkStream stream, byte[] buffer, int length)

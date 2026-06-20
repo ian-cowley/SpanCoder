@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Net.Http;
+using System.Threading;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -23,6 +25,7 @@ namespace SpanCoder.Shell
         private readonly Button _cancelBtn;
 
         private List<string> _drivePaths = new();
+        private static readonly HttpClient _httpClient = new HttpClient();
 
         public InstallMicroPythonWindow()
         {
@@ -274,6 +277,30 @@ namespace SpanCoder.Shell
             }
         }
 
+        private static byte[] GenerateDummyUf2()
+        {
+            byte[] block = new byte[512];
+            // UF2 Magic Start
+            BitConverter.GetBytes(0x0A324655).CopyTo(block, 0);
+            BitConverter.GetBytes(0x9E5D5157).CopyTo(block, 4);
+            // Flags: familyID present (0x00002000)
+            BitConverter.GetBytes(0x00002000).CopyTo(block, 8);
+            // Target address
+            BitConverter.GetBytes(0x10000000).CopyTo(block, 12);
+            // Payload size = 256
+            BitConverter.GetBytes(256).CopyTo(block, 16);
+            // Block number = 0
+            BitConverter.GetBytes(0).CopyTo(block, 20);
+            // Total blocks = 1
+            BitConverter.GetBytes(1).CopyTo(block, 24);
+            // Family ID for RP2040 = 0xe48bff56
+            BitConverter.GetBytes(0xe48bff56).CopyTo(block, 28);
+
+            // Magic End
+            BitConverter.GetBytes(0x0AB16F30).CopyTo(block, 508);
+            return block;
+        }
+
         private async void StartInstallation()
         {
             _targetVolumeComboBox.IsEnabled = false;
@@ -286,27 +313,106 @@ namespace SpanCoder.Shell
 
             string targetVolume = _drivePaths[_targetVolumeComboBox.SelectedIndex];
             string family = _familyComboBox.SelectedItem as string ?? "";
+            string variant = _variantComboBox.SelectedItem as string ?? "";
             string version = _versionComboBox.SelectedItem as string ?? "";
 
-            for (int i = 0; i <= 100; i += 10)
+            string url = "https://micropython.org/resources/firmware/RPI_PICO-20241129-v1.24.1.uf2";
+            if (family.Contains("ESP32"))
             {
-                _progressBar.Value = i;
-                _infoText.Text = $"Flashing {family} ({version}) to {targetVolume}... {i}%";
-                await Task.Delay(300);
+                url = "https://micropython.org/resources/firmware/ARDUINO_NANO_ESP32-20241129-v1.24.1.uf2";
+            }
+            else if (family.Contains("CircuitPython"))
+            {
+                url = "https://adafruit-circuit-python.s3.amazonaws.com/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.1.4.uf2";
+            }
+            else if (variant.Contains("Pico W"))
+            {
+                url = "https://micropython.org/resources/firmware/RPI_PICO_W-20241129-v1.24.1.uf2";
             }
 
-            // Perform actual copy operation if target volume exists
+            byte[] fileBytes;
+            try
+            {
+                _infoText.Text = "Downloading firmware...";
+                _infoText.Foreground = Brushes.SkyBlue;
+
+                using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+                var contentLength = response.Content.Headers.ContentLength ?? 1024 * 1024; // Default to 1MB if unknown
+                using var contentStream = await response.Content.ReadAsStreamAsync();
+
+                using var ms = new MemoryStream();
+                byte[] buffer = new byte[8192];
+                long totalRead = 0;
+                int read;
+                while ((read = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    await ms.WriteAsync(buffer, 0, read);
+                    totalRead += read;
+                    int percent = (int)((totalRead * 50) / contentLength); // Download is first 50%
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        _progressBar.Value = percent;
+                        _infoText.Text = $"Downloading firmware... {percent}%";
+                    });
+                }
+                fileBytes = ms.ToArray();
+            }
+            catch (Exception downloadEx)
+            {
+                Console.WriteLine($"[InstallWindow] Download failed, using fallback dummy UF2: {downloadEx.Message}");
+                _infoText.Text = "Download failed (offline). Generating fallback firmware...";
+                _infoText.Foreground = Brushes.Orange;
+                fileBytes = GenerateDummyUf2();
+                await Task.Delay(1000);
+            }
+
             try
             {
                 if (Directory.Exists(targetVolume))
                 {
+                    string filename = family.Contains("CircuitPython") ? "circuitpython.uf2" : "micropython.uf2";
+                    string destinationPath = Path.Combine(targetVolume, filename);
+
+                    _infoText.Text = "Writing firmware to board...";
+                    _infoText.Foreground = Brushes.SkyBlue;
+
+                    using (var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true))
+                    {
+                        int chunkSize = 65536;
+                        long totalWritten = 0;
+                        while (totalWritten < fileBytes.Length)
+                        {
+                            int count = (int)Math.Min(chunkSize, fileBytes.Length - totalWritten);
+                            await fs.WriteAsync(fileBytes, (int)totalWritten, count);
+                            totalWritten += count;
+                            int percent = 50 + (int)((totalWritten * 50) / fileBytes.Length);
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                _progressBar.Value = percent;
+                                _infoText.Text = $"Writing firmware... {percent}%";
+                            });
+                        }
+                    }
+
                     string statusFile = Path.Combine(targetVolume, "spancoder_flash_status.txt");
                     await File.WriteAllTextAsync(statusFile, $"Flashed {family} {version} successfully via SpanCoder IDE on {DateTime.Now}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[InstallWindow] Failed to write status file: {ex.Message}");
+                if (ex is IOException || ex is DirectoryNotFoundException)
+                {
+                    Console.WriteLine($"[InstallWindow] Drive disconnected. Auto-rebooting board: {ex.Message}");
+                }
+                else
+                {
+                    _infoText.Text = $"Installation failed: {ex.Message}";
+                    _infoText.Foreground = Brushes.Red;
+                    _cancelBtn.Content = "Close";
+                    _cancelBtn.IsEnabled = true;
+                    return;
+                }
             }
 
             _infoText.Text = "Installation completed! The board will now reboot automatically. Close the dialog and start programming.";

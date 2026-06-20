@@ -2346,7 +2346,7 @@ namespace SpanCoder.Shell
 
             if (_commandToExtensionMap.TryGetValue(commandId, out var extId) && _extensionManager != null)
             {
-                if (extId == "html-preview" || extId == "python-lang")
+                if (extId == "html-preview" || extId == "python-lang" || extId == "languages-extension")
                 {
                     string activeFilePath = _activeDocument?.FilePath ?? "";
                     string activeContent = "";

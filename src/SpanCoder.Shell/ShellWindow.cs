@@ -33,7 +33,7 @@ namespace SpanCoder.Shell
         private ScrollBar _hScroll => _activePane.HScroll;
         private StackPanel _tabsContainer => _activePane.TabsContainer;
         private List<OpenDocument> _openDocuments => _activePane.OpenDocuments;
-        private OpenDocument? _activeDocument
+        internal OpenDocument? _activeDocument
         {
             get => _activePane.ActiveDocument;
             set => _activePane.ActiveDocument = value;
@@ -2922,7 +2922,7 @@ namespace SpanCoder.Shell
             _ = RefreshGitStatusAsync();
         }
 
-        private void SwitchToDocument(OpenDocument openDoc)
+        internal void SwitchToDocument(OpenDocument openDoc)
         {
             if (_activeDocument == openDoc)
             {
@@ -3125,13 +3125,13 @@ namespace SpanCoder.Shell
                 if (pane.ActiveDocument == docToClose)
                 {
                     var nextDoc = pane.OpenDocuments[^1];
-                    pane.ActiveDocument = nextDoc;
                     if (_activePane == pane)
                     {
                         SwitchToDocument(nextDoc);
                     }
                     else
                     {
+                        pane.ActiveDocument = nextDoc;
                         RebuildTabsUI(pane);
                     }
                 }
@@ -3150,6 +3150,7 @@ namespace SpanCoder.Shell
             if (pane == null) return;
             
             pane.TabsContainer.Children.Clear();
+            Console.WriteLine($"[RebuildTabsUI] pane.OpenDocuments.Count={pane.OpenDocuments.Count}");
             foreach (var doc in pane.OpenDocuments)
             {
                 var tabBorder = new Border

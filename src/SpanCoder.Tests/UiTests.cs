@@ -408,5 +408,47 @@ namespace SpanCoder.Tests
             // Clean up window
             window.Close();
         }
+
+        [AvaloniaFact]
+        public void TestTabCloseActiveTab()
+        {
+            var window = new ShellWindow();
+            window.InitializeLayout();
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var pane = window._activePane;
+            var doc1 = new ShellWindow.OpenDocument(1, "file1.cs", new SpanCoder.Engine.Document(1, "content1".AsMemory(), "file1.cs"));
+            var doc2 = new ShellWindow.OpenDocument(2, "file2.cs", new SpanCoder.Engine.Document(2, "content2".AsMemory(), "file2.cs"));
+            pane.OpenDocuments.Add(doc1);
+            pane.OpenDocuments.Add(doc2);
+            window.SwitchToDocument(doc1);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(2, pane.OpenDocuments.Count);
+            Assert.Equal(doc1, window._activeDocument);
+
+            Assert.Equal(2, pane.TabsContainer.Children.Count);
+
+            // Get close button for active tab (doc1)
+            var firstTab = pane.TabsContainer.Children[0] as Border;
+            Assert.NotNull(firstTab);
+            var tabContent = firstTab.Child as StackPanel;
+            Assert.NotNull(tabContent);
+            var closeButton = tabContent.Children.OfType<Button>().First();
+            Assert.NotNull(closeButton);
+
+            // Simulate clicking the close button
+            closeButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            // Assertions
+            Assert.Single(pane.OpenDocuments);
+            Assert.Equal(doc2, pane.ActiveDocument);
+            Assert.Equal(1, pane.TabsContainer.Children.Count);
+
+            window.Close();
+        }
     }
 }
+

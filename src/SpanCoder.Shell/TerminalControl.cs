@@ -28,12 +28,15 @@ namespace SpanCoder.Shell
 
     public class TerminalControl : Grid
     {
-        private readonly ListBox _listBox;
+        private readonly ScrollViewer _scrollViewer;
+        private readonly ItemsControl _itemsControl;
         private readonly ObservableCollection<TerminalLine> _lines = new();
         public ObservableCollection<TerminalLine> Lines => _lines;
         private PtyHost? _pty;
         private IBrush _currentBrush = Brushes.LightGray;
         private bool _carriageReturned;
+        private readonly Decoder _utf8Decoder = Encoding.UTF8.GetDecoder();
+        private readonly object _decoderLock = new();
 
         // ANSI Color palette
         private static readonly IBrush ColorBlack = Brushes.Black;
@@ -51,10 +54,15 @@ namespace SpanCoder.Shell
             Background = new SolidColorBrush(Color.Parse("#1E1E1E"));
             Focusable = true;
 
-            _listBox = new ListBox
+            _scrollViewer = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+
+            _itemsControl = new ItemsControl
             {
                 Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
                 Padding = new Thickness(5),
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
@@ -62,7 +70,7 @@ namespace SpanCoder.Shell
             };
 
             // Custom ItemTemplate to render lines with styled Inlines
-            _listBox.ItemTemplate = new FuncDataTemplate<TerminalLine>((line, names) =>
+            _itemsControl.ItemTemplate = new FuncDataTemplate<TerminalLine>((line, names) =>
             {
                 var tb = new TextBlock
                 {
@@ -84,6 +92,10 @@ namespace SpanCoder.Shell
                         {
                             tb.Inlines.Add(new Avalonia.Controls.Documents.Run { Text = run.Text, Foreground = run.Brush });
                         }
+                        if (line == _lines.LastOrDefault())
+                        {
+                            tb.Inlines.Add(new Avalonia.Controls.Documents.Run { Text = "█", Foreground = Brushes.LightGray });
+                        }
                     }
                 }
 
@@ -93,8 +105,9 @@ namespace SpanCoder.Shell
                 return tb;
             }, true);
 
-            _listBox.ItemsSource = _lines;
-            Children.Add(_listBox);
+            _itemsControl.ItemsSource = _lines;
+            _scrollViewer.Content = _itemsControl;
+            Children.Add(_scrollViewer);
 
             // Add first empty line
             _lines.Add(new TerminalLine());
@@ -112,21 +125,45 @@ namespace SpanCoder.Shell
 
         private void Lines_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         {
+            if (e.Action == NotifyCollectionChangedAction.Add)
+            {
+                // Refresh runs of the previously last line to remove its cursor
+                if (_lines.Count > 1)
+                {
+                    var prevLine = _lines[_lines.Count - 2];
+                    var lastRun = prevLine.Runs.LastOrDefault();
+                    if (lastRun != null)
+                    {
+                        int idx = prevLine.Runs.IndexOf(lastRun);
+                        prevLine.Runs[idx] = new TerminalRun { Text = lastRun.Text, Brush = lastRun.Brush };
+                    }
+                    else
+                    {
+                        prevLine.Runs.Add(new TerminalRun { Text = "" });
+                        prevLine.Runs.RemoveAt(0);
+                    }
+                }
+            }
+
             if (_lines.Count > 0)
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (_lines.Count > 0)
-                    {
-                        _listBox.ScrollIntoView(_lines.Last());
-                    }
+                    _scrollViewer.ScrollToEnd();
                 });
             }
         }
 
         private void Pty_DataReceived(byte[] data, int length)
         {
-            string text = Encoding.UTF8.GetString(data, 0, length);
+            string text;
+            lock (_decoderLock)
+            {
+                int charCount = _utf8Decoder.GetCharCount(data, 0, length);
+                char[] chars = new char[charCount];
+                _utf8Decoder.GetChars(data, 0, length, chars, 0);
+                text = new string(chars);
+            }
             Dispatcher.UIThread.Post(() => ProcessOutputText(text));
         }
 
@@ -313,7 +350,7 @@ namespace SpanCoder.Shell
                 case Key.Enter:
                     return "\r";
                 case Key.Back:
-                    return "\u007f";
+                    return System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? "\u0008" : "\u007f";
                 case Key.Tab:
                     return "\t";
                 case Key.Escape:

@@ -1349,7 +1349,20 @@ namespace SpanCoder.Shell
                 : "C:\\";
 
             string shellPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "powershell.exe" : "/bin/bash";
-            if (_terminalPty.Start(shellPath, Array.Empty<string>(), workingDir, 80, 24))
+            string[] shellArgs = Array.Empty<string>();
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                if (shellPath.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+                {
+                    shellArgs = new[] { "-NoExit", "-Command", "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8;" };
+                }
+                else if (shellPath.Contains("cmd.exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    shellArgs = new[] { "/K", "chcp 65001" };
+                }
+            }
+
+            if (_terminalPty.Start(shellPath, shellArgs, workingDir, 80, 24))
             {
                 _terminalControl.BindPty(_terminalPty);
             }

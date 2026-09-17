@@ -6,6 +6,21 @@ Rather than relying on a traditional monolithic architecture where a heavy UI th
 
 ---
 
+## 🖼️ Visual Gallery: Real Rendered IDE Interface
+
+The screen below is captured directly from `SpanCoder.Shell` running on Avalonia UI with SkiaSharp hardware rasterization:
+
+<div align="center">
+
+| SpanCoder Out-of-Process Native Developer IDE (.NET 10 & Avalonia) |
+| :---: |
+| ![SpanCoder IDE Interface](docs/images/spancoder_ide_interface.png) |
+| *Multi-pane editor tabs, piece-table text buffers, SIMD line indexing, and decoupled out-of-process engine* |
+
+</div>
+
+---
+
 ## Architectural Overview
 
 ```mermaid

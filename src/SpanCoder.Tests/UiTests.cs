@@ -449,6 +449,36 @@ namespace SpanCoder.Tests
 
             window.Close();
         }
+
+        [AvaloniaFact]
+        public void ExportIdeInterfaceScreenshot()
+        {
+            var window = new ShellWindow();
+            window.Width = 1280;
+            window.Height = 800;
+            window.InitializeLayout();
+
+            string sampleCode = "namespace Glacier.Polaris.Core;\n\nusing System;\nusing System.Runtime.Intrinsics;\nusing System.Runtime.Intrinsics.X86;\n\n/// <summary>\n/// High-performance AVX-512 columnar aggregation kernel.\n/// </summary>\npublic static class ColumnarAggregator\n{\n    public static float SumVectorized(ReadOnlySpan<float> data)\n    {\n        Vector512<float> acc = Vector512<float>.Zero;\n        int i = 0;\n        for (; i <= data.Length - 16; i += 16)\n        {\n            acc += Vector512.LoadUnsafe(ref data[i]);\n        }\n        float sum = Vector512.Sum(acc);\n        for (; i < data.Length; i++) sum += data[i];\n        return sum;\n    }\n}\n";
+            var pane = window._activePane;
+            var doc = new ShellWindow.OpenDocument(1, "ColumnarAggregator.cs", new SpanCoder.Engine.Document(1, sampleCode.AsMemory(), "ColumnarAggregator.cs"));
+            pane.OpenDocuments.Add(doc);
+            window.SwitchToDocument(doc);
+
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            var frame = window.CaptureRenderedFrame();
+            if (frame != null)
+            {
+                string targetDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "docs", "images"));
+                System.IO.Directory.CreateDirectory(targetDir);
+                string outPath = System.IO.Path.Combine(targetDir, "spancoder_ide_interface.png");
+                frame.Save(outPath);
+                Console.WriteLine("Saved screenshot to: " + outPath);
+            }
+
+            window.Close();
+        }
     }
 }
 

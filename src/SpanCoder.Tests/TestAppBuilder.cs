@@ -10,9 +10,10 @@ namespace SpanCoder.Tests
     {
         public static AppBuilder BuildAvaloniaApp() =>
             AppBuilder.Configure<SpanCoder.App.App>()
+                .UseSkia()
                 .UseHeadless(new AvaloniaHeadlessPlatformOptions
                 {
-                    UseHeadlessDrawing = true
+                    UseHeadlessDrawing = false
                 });
     }
 }

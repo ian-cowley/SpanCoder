@@ -10,8 +10,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SpanCoder.Contracts\SpanCoder.Contracts.csproj" />
-    <ProjectReference Include="..\..\..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj" />
     <ProjectReference Include="..\..\tools\SpanCoder.SourceGenerators\SpanCoder.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj')">
+    <ProjectReference Include="..\..\..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('..\..\..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj')">
+    <PackageReference Include="Glacier.Grep" Version="1.0.1" />
   </ItemGroup>
 
   <ItemGroup>

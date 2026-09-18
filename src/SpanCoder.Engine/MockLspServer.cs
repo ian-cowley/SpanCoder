@@ -2,6 +2,9 @@ using System;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace SpanCoder.Engine
 {
@@ -207,155 +210,63 @@ namespace SpanCoder.Engine
 
         private static void PublishDiagnostics(Stream stdout, string uri, string text)
         {
+            var syntaxTree = CSharpSyntaxTree.ParseText(text);
+            var diagnostics = syntaxTree.GetDiagnostics();
+
             var diagnosticsList = new System.Text.StringBuilder();
             diagnosticsList.Append("[");
-
-            string[] lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
             bool first = true;
 
-            bool inBlockComment = false;
-            bool inVerbatimString = false;
-
-            for (int i = 0; i < lines.Length; i++)
+            foreach (var diag in diagnostics)
             {
-                string line = lines[i];
-                string trimmed = line.Trim();
+                if (!first) diagnosticsList.Append(",");
+                first = false;
 
-                if (trimmed.StartsWith("var ", StringComparison.Ordinal) && IsVarMissingSemicolon(lines, i))
+                var lineSpan = diag.Location.GetLineSpan();
+                int startLine = lineSpan.StartLinePosition.Line;
+                int startChar = lineSpan.StartLinePosition.Character;
+                int endLine = lineSpan.EndLinePosition.Line;
+                int endChar = lineSpan.EndLinePosition.Character;
+                int severity = diag.Severity switch
                 {
+                    DiagnosticSeverity.Error => 1,
+                    DiagnosticSeverity.Warning => 2,
+                    DiagnosticSeverity.Info => 3,
+                    _ => 4
+                };
+                string msg = diag.GetMessage().Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", " ");
+                diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{startLine},\"character\":{startChar}}},\"end\":{{\"line\":{endLine},\"character\":{endChar}}}}},\"severity\":{severity},\"message\":\"{msg}\"}}");
+            }
+
+            var root = syntaxTree.GetCompilationUnitRoot();
+
+            foreach (var token in root.DescendantTokens())
+            {
+                if (token.IsKind(SyntaxKind.IdentifierToken) && token.Text.Equals("error", StringComparison.OrdinalIgnoreCase))
+                {
+                    var span = token.GetLocation().GetLineSpan();
                     if (!first) diagnosticsList.Append(",");
                     first = false;
-                    int lineLen = line.Length;
-                    diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":0}},\"end\":{{\"line\":{i},\"character\":{lineLen}}}}},\"severity\":1,\"message\":\"; expected\"}}");
+                    int startLine = span.StartLinePosition.Line;
+                    int startChar = span.StartLinePosition.Character;
+                    diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{startLine},\"character\":{startChar}}},\"end\":{{\"line\":{startLine},\"character\":{startChar + 5}}}}},\"severity\":1,\"message\":\"Mock error description: Identifier 'error' unresolved\"}}");
                 }
+            }
 
-                bool inLineComment = false;
-                bool inString = false;
-                bool inChar = false;
-
-                for (int c = 0; c < line.Length; c++)
+            foreach (var trivia in root.DescendantTrivia())
+            {
+                if (trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) || trivia.IsKind(SyntaxKind.MultiLineCommentTrivia))
                 {
-                    char ch = line[c];
-
-                    if (!inString && !inChar && !inVerbatimString)
+                    string comment = trivia.ToString();
+                    int todoIdx = comment.IndexOf("todo", StringComparison.OrdinalIgnoreCase);
+                    if (todoIdx >= 0)
                     {
-                        if (!inBlockComment && ch == '/' && c + 1 < line.Length && line[c + 1] == '/')
-                        {
-                            inLineComment = true;
-                            c++;
-                            continue;
-                        }
-                        if (!inLineComment && ch == '/' && c + 1 < line.Length && line[c + 1] == '*')
-                        {
-                            inBlockComment = true;
-                            c++;
-                            continue;
-                        }
-                    }
-
-                    if (inBlockComment)
-                    {
-                        if (ch == '*' && c + 1 < line.Length && line[c + 1] == '/')
-                        {
-                            inBlockComment = false;
-                            c++;
-                        }
-                        else
-                        {
-                            if (c + 4 <= line.Length && string.Equals(line.Substring(c, 4), "todo", StringComparison.OrdinalIgnoreCase))
-                            {
-                                if (!first) diagnosticsList.Append(",");
-                                first = false;
-                                diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{c}}},\"end\":{{\"line\":{i},\"character\":{c + 4}}}}},\"severity\":2,\"message\":\"TODO comment found\"}}");
-                            }
-                        }
-                        continue;
-                    }
-
-                    if (inLineComment)
-                    {
-                        if (c + 4 <= line.Length && string.Equals(line.Substring(c, 4), "todo", StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (!first) diagnosticsList.Append(",");
-                            first = false;
-                            diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{c}}},\"end\":{{\"line\":{i},\"character\":{c + 4}}}}},\"severity\":2,\"message\":\"TODO comment found\"}}");
-                        }
-                        continue;
-                    }
-
-                    if (inVerbatimString)
-                    {
-                        if (ch == '"')
-                        {
-                            if (c + 1 < line.Length && line[c + 1] == '"')
-                            {
-                                c++;
-                            }
-                            else
-                            {
-                                inVerbatimString = false;
-                            }
-                        }
-                        continue;
-                    }
-
-                    if (inString)
-                    {
-                        if (ch == '\\' && c + 1 < line.Length)
-                        {
-                            c++;
-                        }
-                        else if (ch == '"')
-                        {
-                            inString = false;
-                        }
-                        continue;
-                    }
-
-                    if (inChar)
-                    {
-                        if (ch == '\\' && c + 1 < line.Length)
-                        {
-                            c++;
-                        }
-                        else if (ch == '\'')
-                        {
-                            inChar = false;
-                        }
-                        continue;
-                    }
-
-                    if (ch == '@' && c + 1 < line.Length && line[c + 1] == '"')
-                    {
-                        inVerbatimString = true;
-                        c++;
-                        continue;
-                    }
-                    if (ch == '"')
-                    {
-                        inString = true;
-                        continue;
-                    }
-                    if (ch == '\'')
-                    {
-                        inChar = true;
-                        continue;
-                    }
-
-                    if (c + 5 <= line.Length && string.Equals(line.Substring(c, 5), "error", StringComparison.OrdinalIgnoreCase))
-                    {
-                        bool isPrevWordChar = c > 0 && (char.IsLetterOrDigit(line[c - 1]) || line[c - 1] == '_');
-                        bool isNextWordChar = c + 5 < line.Length && (char.IsLetterOrDigit(line[c + 5]) || line[c + 5] == '_');
-
-                        if (!isPrevWordChar && !isNextWordChar)
-                        {
-                            if (!line.Contains("errorDescription", StringComparison.OrdinalIgnoreCase) && !line.Contains("ErrorMock", StringComparison.OrdinalIgnoreCase))
-                            {
-                                if (!first) diagnosticsList.Append(",");
-                                first = false;
-                                diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{c}}},\"end\":{{\"line\":{i},\"character\":{c + 5}}}}},\"severity\":1,\"message\":\"Mock error description\"}}");
-                            }
-                        }
+                        var lineSpan = trivia.GetLocation().GetLineSpan();
+                        int line = lineSpan.StartLinePosition.Line;
+                        int charStart = lineSpan.StartLinePosition.Character + todoIdx;
+                        if (!first) diagnosticsList.Append(",");
+                        first = false;
+                        diagnosticsList.Append($"{{\"range\":{{\"start\":{{\"line\":{line},\"character\":{charStart}}},\"end\":{{\"line\":{line},\"character\":{charStart + 4}}}}},\"severity\":2,\"message\":\"TODO comment found\"}}");
                     }
                 }
             }
@@ -364,97 +275,6 @@ namespace SpanCoder.Engine
 
             string notificationJson = $"{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":\"{uri}\",\"diagnostics\":{diagnosticsList.ToString()}}}}}";
             SendNotification(stdout, notificationJson);
-        }
-
-        private static bool IsVarMissingSemicolon(string[] lines, int startIndex)
-        {
-            int parens = 0;
-            int braces = 0;
-            int brackets = 0;
-            bool inString = false;
-            bool inChar = false;
-
-            for (int idx = startIndex; idx < lines.Length; idx++)
-            {
-                string line = lines[idx];
-                string trimmed = line.Trim();
-
-                if (idx > startIndex && !inString && !inChar && parens == 0 && braces == 0 && brackets == 0)
-                {
-                    if (trimmed.StartsWith("public ", StringComparison.Ordinal) ||
-                        trimmed.StartsWith("private ", StringComparison.Ordinal) ||
-                        trimmed.StartsWith("protected ", StringComparison.Ordinal) ||
-                        trimmed.StartsWith("internal ", StringComparison.Ordinal) ||
-                        trimmed.StartsWith("void ", StringComparison.Ordinal) ||
-                        trimmed.StartsWith("class ", StringComparison.Ordinal) ||
-                        trimmed.StartsWith("using ", StringComparison.Ordinal) ||
-                        trimmed.StartsWith("var ", StringComparison.Ordinal) ||
-                        trimmed.StartsWith("return ", StringComparison.Ordinal) ||
-                        trimmed == "}" || trimmed == "")
-                    {
-                        return true;
-                    }
-                }
-
-                for (int c = 0; c < line.Length; c++)
-                {
-                    char ch = line[c];
-
-                    if (!inString && !inChar && ch == '/' && c + 1 < line.Length && line[c + 1] == '/')
-                    {
-                        break;
-                    }
-
-                    if (inString)
-                    {
-                        if (ch == '"' && (c == 0 || line[c - 1] != '\\'))
-                        {
-                            inString = false;
-                        }
-                        continue;
-                    }
-                    if (inChar)
-                    {
-                        if (ch == '\'' && (c == 0 || line[c - 1] != '\\'))
-                        {
-                            inChar = false;
-                        }
-                        continue;
-                    }
-
-                    if (ch == '"')
-                    {
-                        inString = true;
-                        continue;
-                    }
-                    if (ch == '\'')
-                    {
-                        inChar = true;
-                        continue;
-                    }
-
-                    if (ch == '(') parens++;
-                    else if (ch == ')') parens = Math.Max(0, parens - 1);
-                    else if (ch == '{') braces++;
-                    else if (ch == '}') braces = Math.Max(0, braces - 1);
-                    else if (ch == '[') brackets++;
-                    else if (ch == ']') brackets = Math.Max(0, brackets - 1);
-                    else if (ch == ';')
-                    {
-                        if (parens == 0 && braces == 0 && brackets == 0)
-                        {
-                            return false;
-                        }
-                    }
-                }
-
-                if (idx == lines.Length - 1)
-                {
-                    return true;
-                }
-            }
-
-            return true;
         }
 
         private static string GetMockCompletions(string? text, int line, int character)
@@ -558,47 +378,34 @@ namespace SpanCoder.Engine
             {
                 string docUri = kvp.Key;
                 string docText = kvp.Value;
-                string[] docLines = docText.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                for (int i = 0; i < docLines.Length; i++)
+                var syntaxTree = CSharpSyntaxTree.ParseText(docText);
+                var root = syntaxTree.GetCompilationUnitRoot();
+
+                foreach (var node in root.DescendantNodes())
                 {
-                    string l = docLines[i];
-                    int idx = l.IndexOf(word);
-                    if (idx >= 0)
+                    if (node is BaseTypeDeclarationSyntax typeDecl && typeDecl.Identifier.Text == word)
                     {
-                        // Check for type definition: class, struct, interface, enum, record
-                        bool isTypeDecl = false;
-                        string[] typeKeywords = { "class", "struct", "interface", "enum", "record" };
-                        foreach (var kw in typeKeywords)
-                        {
-                            int kwIdx = l.IndexOf(kw);
-                            if (kwIdx >= 0 && kwIdx < idx)
-                            {
-                                string sub = l.Substring(kwIdx + kw.Length, idx - (kwIdx + kw.Length)).Trim();
-                                if (sub.Length == 0)
-                                {
-                                    isTypeDecl = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Check for method declaration: "void Word", "int Word", or generally ending with "("
-                        bool isMethodDecl = false;
-                        int afterWord = idx + word.Length;
-                        while (afterWord < l.Length && char.IsWhiteSpace(l[afterWord])) afterWord++;
-                        if (afterWord < l.Length && l[afterWord] == '(')
-                        {
-                            if (idx == 0 || l[idx - 1] != '.')
-                            {
-                                isMethodDecl = true;
-                            }
-                        }
-
-                        if (isTypeDecl || isMethodDecl)
-                        {
-                            string escapedUri = docUri.Replace("\\", "\\\\").Replace("\"", "\\\"");
-                            return $"{{\"uri\":\"{escapedUri}\",\"range\":{{\"start\":{{\"line\":{i},\"character\":{idx}}},\"end\":{{\"line\":{i},\"character\":{idx + word.Length}}}}}}}";
-                        }
+                        var span = typeDecl.Identifier.GetLocation().GetLineSpan();
+                        string escapedUri = docUri.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                        int defLine = span.StartLinePosition.Line;
+                        int defChar = span.StartLinePosition.Character;
+                        return $"{{\"uri\":\"{escapedUri}\",\"range\":{{\"start\":{{\"line\":{defLine},\"character\":{defChar}}},\"end\":{{\"line\":{defLine},\"character\":{defChar + word.Length}}}}}}}";
+                    }
+                    if (node is MethodDeclarationSyntax methodDecl && methodDecl.Identifier.Text == word)
+                    {
+                        var span = methodDecl.Identifier.GetLocation().GetLineSpan();
+                        string escapedUri = docUri.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                        int defLine = span.StartLinePosition.Line;
+                        int defChar = span.StartLinePosition.Character;
+                        return $"{{\"uri\":\"{escapedUri}\",\"range\":{{\"start\":{{\"line\":{defLine},\"character\":{defChar}}},\"end\":{{\"line\":{defLine},\"character\":{defChar + word.Length}}}}}}}";
+                    }
+                    if (node is PropertyDeclarationSyntax propDecl && propDecl.Identifier.Text == word)
+                    {
+                        var span = propDecl.Identifier.GetLocation().GetLineSpan();
+                        string escapedUri = docUri.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                        int defLine = span.StartLinePosition.Line;
+                        int defChar = span.StartLinePosition.Character;
+                        return $"{{\"uri\":\"{escapedUri}\",\"range\":{{\"start\":{{\"line\":{defLine},\"character\":{defChar}}},\"end\":{{\"line\":{defLine},\"character\":{defChar + word.Length}}}}}}}";
                     }
                 }
             }
@@ -630,24 +437,20 @@ namespace SpanCoder.Engine
             {
                 string docUri = kvp.Key;
                 string docText = kvp.Value;
-                string[] docLines = docText.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                for (int i = 0; i < docLines.Length; i++)
+                var syntaxTree = CSharpSyntaxTree.ParseText(docText);
+                var root = syntaxTree.GetCompilationUnitRoot();
+
+                foreach (var token in root.DescendantTokens())
                 {
-                    string l = docLines[i];
-                    int idx = 0;
-                    while ((idx = l.IndexOf(word, idx)) >= 0)
+                    if (token.IsKind(SyntaxKind.IdentifierToken) && token.Text == word)
                     {
-                        bool beforeOk = (idx == 0 || !char.IsLetterOrDigit(l[idx - 1]));
-                        bool afterOk = (idx + word.Length == l.Length || !char.IsLetterOrDigit(l[idx + word.Length]));
-                        
-                        if (beforeOk && afterOk)
-                        {
-                            if (!first) sb.Append(",");
-                            first = false;
-                            string escapedUri = docUri.Replace("\\", "\\\\").Replace("\"", "\\\"");
-                            sb.Append($"{{\"uri\":\"{escapedUri}\",\"range\":{{\"start\":{{\"line\":{i},\"character\":{idx}}},\"end\":{{\"line\":{i},\"character\":{idx + word.Length}}}}}}}");
-                        }
-                        idx += word.Length;
+                        var span = token.GetLocation().GetLineSpan();
+                        if (!first) sb.Append(",");
+                        first = false;
+                        string escapedUri = docUri.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                        int tokLine = span.StartLinePosition.Line;
+                        int tokChar = span.StartLinePosition.Character;
+                        sb.Append($"{{\"uri\":\"{escapedUri}\",\"range\":{{\"start\":{{\"line\":{tokLine},\"character\":{tokChar}}},\"end\":{{\"line\":{tokLine},\"character\":{tokChar + word.Length}}}}}}}");
                     }
                 }
             }
@@ -680,23 +483,18 @@ namespace SpanCoder.Engine
             {
                 string docUri = kvp.Key;
                 string docText = kvp.Value;
-                string[] docLines = docText.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                
+                var syntaxTree = CSharpSyntaxTree.ParseText(docText);
+                var root = syntaxTree.GetCompilationUnitRoot();
+
                 var docEdits = new System.Collections.Generic.List<string>();
-                for (int i = 0; i < docLines.Length; i++)
+                foreach (var token in root.DescendantTokens())
                 {
-                    string l = docLines[i];
-                    int idx = 0;
-                    while ((idx = l.IndexOf(word, idx)) >= 0)
+                    if (token.IsKind(SyntaxKind.IdentifierToken) && token.Text == word)
                     {
-                        bool beforeOk = (idx == 0 || !char.IsLetterOrDigit(l[idx - 1]));
-                        bool afterOk = (idx + word.Length == l.Length || !char.IsLetterOrDigit(l[idx + word.Length]));
-                        
-                        if (beforeOk && afterOk)
-                        {
-                            docEdits.Add($"{{\"range\":{{\"start\":{{\"line\":{i},\"character\":{idx}}},\"end\":{{\"line\":{i},\"character\":{idx + word.Length}}}}},\"newText\":\"{newName}\"}}");
-                        }
-                        idx += word.Length;
+                        var span = token.GetLocation().GetLineSpan();
+                        int tokLine = span.StartLinePosition.Line;
+                        int tokChar = span.StartLinePosition.Character;
+                        docEdits.Add($"{{\"range\":{{\"start\":{{\"line\":{tokLine},\"character\":{tokChar}}},\"end\":{{\"line\":{tokLine},\"character\":{tokChar + word.Length}}}}},\"newText\":\"{newName}\"}}");
                     }
                 }
 
@@ -717,52 +515,46 @@ namespace SpanCoder.Engine
         {
             if (string.IsNullOrEmpty(text)) return "[]";
 
-            string[] lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            var syntaxTree = CSharpSyntaxTree.ParseText(text);
+            var root = syntaxTree.GetCompilationUnitRoot();
             var sb = new System.Text.StringBuilder();
             sb.Append("[");
             bool first = true;
 
-            for (int i = 0; i < lines.Length; i++)
+            foreach (var node in root.DescendantNodes())
             {
-                string l = lines[i];
-                string trimmed = l.Trim();
-                
-                bool isDecl = false;
-                string kind = "";
-                string name = "";
-                
-                string[] keywords = { "class", "struct", "interface", "enum", "void", "string", "int", "Task", "bool" };
-                foreach (var kw in keywords)
-                {
-                    int kwIdx = l.IndexOf(kw + " ");
-                    if (kwIdx >= 0)
-                    {
-                        int startName = kwIdx + kw.Length + 1;
-                        while (startName < l.Length && char.IsWhiteSpace(l[startName])) startName++;
-                        int endName = startName;
-                        while (endName < l.Length && (char.IsLetterOrDigit(l[endName]) || l[endName] == '_')) endName++;
-                        
-                        if (endName > startName)
-                        {
-                            name = l.Substring(startName, endName - startName);
-                            if (Array.IndexOf(keywords, name) < 0)
-                            {
-                                isDecl = true;
-                                kind = kw;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (isDecl && !string.IsNullOrEmpty(name))
+                if (node is BaseTypeDeclarationSyntax typeDecl)
                 {
                     if (!first) sb.Append(",");
                     first = false;
-                    
-                    int idx = l.IndexOf(name);
-                    string detail = kind;
-                    sb.Append($"{{\"name\":\"{name}\",\"detail\":\"{detail}\",\"range\":{{\"start\":{{\"line\":{i},\"character\":{idx}}},\"end\":{{\"line\":{i},\"character\":{idx + name.Length}}}}}}}");
+                    var span = typeDecl.Identifier.GetLocation().GetLineSpan();
+                    string kind = typeDecl.Kind().ToString().Replace("Declaration", "").ToLowerInvariant();
+                    int line = span.StartLinePosition.Line;
+                    int charIdx = span.StartLinePosition.Character;
+                    int len = typeDecl.Identifier.Text.Length;
+                    sb.Append($"{{\"name\":\"{typeDecl.Identifier.Text}\",\"detail\":\"{kind}\",\"range\":{{\"start\":{{\"line\":{line},\"character\":{charIdx}}},\"end\":{{\"line\":{line},\"character\":{charIdx + len}}}}}}}");
+                }
+                else if (node is MethodDeclarationSyntax methodDecl)
+                {
+                    if (!first) sb.Append(",");
+                    first = false;
+                    var span = methodDecl.Identifier.GetLocation().GetLineSpan();
+                    string detail = methodDecl.ReturnType.ToString();
+                    int line = span.StartLinePosition.Line;
+                    int charIdx = span.StartLinePosition.Character;
+                    int len = methodDecl.Identifier.Text.Length;
+                    sb.Append($"{{\"name\":\"{methodDecl.Identifier.Text}\",\"detail\":\"{detail}\",\"range\":{{\"start\":{{\"line\":{line},\"character\":{charIdx}}},\"end\":{{\"line\":{line},\"character\":{charIdx + len}}}}}}}");
+                }
+                else if (node is PropertyDeclarationSyntax propDecl)
+                {
+                    if (!first) sb.Append(",");
+                    first = false;
+                    var span = propDecl.Identifier.GetLocation().GetLineSpan();
+                    string detail = propDecl.Type.ToString();
+                    int line = span.StartLinePosition.Line;
+                    int charIdx = span.StartLinePosition.Character;
+                    int len = propDecl.Identifier.Text.Length;
+                    sb.Append($"{{\"name\":\"{propDecl.Identifier.Text}\",\"detail\":\"{detail}\",\"range\":{{\"start\":{{\"line\":{line},\"character\":{charIdx}}},\"end\":{{\"line\":{line},\"character\":{charIdx + len}}}}}}}");
                 }
             }
 

@@ -4,9 +4,13 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Diagnostics.NETCore.Client;
 
 namespace SpanCoder.Engine
 {
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode", Justification = "Authentic debug stack frame inspection")]
     public class MockDapServer
     {
         private static readonly object _writeLock = new object();
@@ -143,12 +147,58 @@ namespace SpanCoder.Engine
                 }
                 else if (command == "threads")
                 {
-                    SendResponse(stdout, requestSeq, command, "{\"threads\":[{\"id\":1,\"name\":\"Main Thread\"}]}");
+                    var threadList = new System.Text.StringBuilder("[");
+                    bool firstT = true;
+                    try
+                    {
+                        var proc = Process.GetCurrentProcess();
+                        foreach (ProcessThread t in proc.Threads)
+                        {
+                            if (!firstT) threadList.Append(",");
+                            firstT = false;
+                            threadList.Append($"{{\"id\":{t.Id},\"name\":\"Thread {t.Id}\"}}");
+                        }
+                    }
+                    catch { }
+                    if (firstT)
+                    {
+                        threadList.Append("{\"id\":1,\"name\":\"Main Thread\"}");
+                    }
+                    threadList.Append("]");
+                    SendResponse(stdout, requestSeq, command, $"{{\"threads\":{threadList.ToString()}}}");
                 }
                 else if (command == "stackTrace")
                 {
-                    string escapedPath = _currentFilePath.Replace("\\", "/");
-                    SendResponse(stdout, requestSeq, command, $"{{\"stackFrames\":[{{\"id\":1001,\"name\":\"Program.Main()\",\"source\":{{\"name\":\"Program.cs\",\"path\":\"{escapedPath}\"}},\"line\":{_currentLine},\"column\":1}}]}}");
+                    var st = new StackTrace(true);
+                    var framesList = new System.Text.StringBuilder("[");
+                    bool firstF = true;
+                    var frames = st.GetFrames();
+                    if (frames != null && frames.Length > 0)
+                    {
+                        for (int fi = 0; fi < Math.Min(frames.Length, 8); fi++)
+                        {
+                            var f = frames[fi];
+                            var m = f.GetMethod();
+                            string mName = m != null ? $"{m.DeclaringType?.Name}.{m.Name}()" : "NativeMethod()";
+                            string fPath = f.GetFileName() ?? _currentFilePath;
+                            string escaped = fPath.Replace("\\", "/");
+                            int fLine = f.GetFileLineNumber();
+                            if (fLine == 0) fLine = _currentLine;
+                            int fCol = f.GetFileColumnNumber();
+                            if (fCol == 0) fCol = 1;
+
+                            if (!firstF) framesList.Append(",");
+                            firstF = false;
+                            framesList.Append($"{{\"id\":{1001 + fi},\"name\":\"{mName}\",\"source\":{{\"name\":\"{Path.GetFileName(fPath)}\",\"path\":\"{escaped}\"}},\"line\":{fLine},\"column\":{fCol}}}");
+                        }
+                    }
+                    if (firstF)
+                    {
+                        string escapedPath = _currentFilePath.Replace("\\", "/");
+                        framesList.Append($"{{\"id\":1001,\"name\":\"Program.Main()\",\"source\":{{\"name\":\"Program.cs\",\"path\":\"{escapedPath}\"}},\"line\":{_currentLine},\"column\":1}}");
+                    }
+                    framesList.Append("]");
+                    SendResponse(stdout, requestSeq, command, $"{{\"stackFrames\":{framesList.ToString()}}}");
                 }
                 else if (command == "scopes")
                 {
@@ -156,7 +206,14 @@ namespace SpanCoder.Engine
                 }
                 else if (command == "variables")
                 {
-                    SendResponse(stdout, requestSeq, command, "{\"variables\":[{\"name\":\"args\",\"value\":\"string[0]\",\"type\":\"string[]\",\"variablesReference\":0},{\"name\":\"x\",\"value\":\"123\",\"type\":\"int\",\"variablesReference\":0},{\"name\":\"status\",\"value\":\"\\\"Running\\\"\",\"type\":\"string\",\"variablesReference\":0}]}");
+                    var vars = new System.Text.StringBuilder("[");
+                    vars.Append($"{{\"name\":\"ProcessId\",\"value\":\"{Environment.ProcessId}\",\"type\":\"int\",\"variablesReference\":0}},");
+                    vars.Append($"{{\"name\":\"DotNetVersion\",\"value\":\"\\\"{Environment.Version}\\\"\",\"type\":\"string\",\"variablesReference\":0}},");
+                    vars.Append($"{{\"name\":\"WorkingSetBytes\",\"value\":\"{Environment.WorkingSet}\",\"type\":\"long\",\"variablesReference\":0}},");
+                    vars.Append($"{{\"name\":\"CurrentDirectory\",\"value\":\"\\\"{JsonEncodedText.Encode(Environment.CurrentDirectory)}\\\"\",\"type\":\"string\",\"variablesReference\":0}},");
+                    vars.Append($"{{\"name\":\"ManagedThreadId\",\"value\":\"{Environment.CurrentManagedThreadId}\",\"type\":\"int\",\"variablesReference\":0}}");
+                    vars.Append("]");
+                    SendResponse(stdout, requestSeq, command, $"{{\"variables\":{vars.ToString()}}}");
                 }
                 else if (command == "continue")
                 {

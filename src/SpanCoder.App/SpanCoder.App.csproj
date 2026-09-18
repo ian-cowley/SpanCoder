@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
     <IsTrimmable>true</IsTrimmable>
+    <Version>1.0.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,7 +17,6 @@
     <ProjectReference Include="..\SpanCoder.Extensions.Prettier\SpanCoder.Extensions.Prettier.csproj" ReferenceOutputAssembly="false" OutputItemType="None" />
     <ProjectReference Include="..\SpanCoder.Extensions.Languages\SpanCoder.Extensions.Languages.csproj" ReferenceOutputAssembly="false" OutputItemType="None" />
     <ProjectReference Include="..\SpanCoder.Extensions.HtmlPreview\SpanCoder.Extensions.HtmlPreview.csproj" ReferenceOutputAssembly="false" OutputItemType="None" />
-    <ProjectReference Include="..\SpanCoder.Extensions.Python\SpanCoder.Extensions.Python.csproj" ReferenceOutputAssembly="false" OutputItemType="None" />
   </ItemGroup>
 
   <ItemGroup>

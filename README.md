@@ -1,5 +1,10 @@
 # SpanCoder IDE
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-purple.svg)](https://dotnet.microsoft.com/)
+[![Native AOT](https://img.shields.io/badge/Native%20AOT-Ready-brightgreen.svg)](https://learn.microsoft.com/dotnet/core/deploying/native-aot/)
+[![Ecosystem](https://img.shields.io/badge/Glacier-Ecosystem-blue)](https://github.com/ian-cowley)
+
 SpanCoder is a cutting-edge, high-performance, extensibility-first Integrated Development Environment (IDE) built on **.NET 10** and **Avalonia UI**. Designed from the ground up for sub-millisecond startup, Native AOT compilation compatibility, and out-of-process resilience, SpanCoder aims to deliver a modern, premium experience for professional software developers.
 
 Rather than relying on a traditional monolithic architecture where a heavy UI thread handles rendering, file buffer parsing, compiler services, and extensions, SpanCoder isolates critical subsystems into dedicated, decoupled processes. These processes communicate over low-latency binary-serialized TCP channels and standard stream-based redirects.

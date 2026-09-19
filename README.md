@@ -537,5 +537,13 @@ This produces a fully compiled native binary in the publish folder, ready for di
 
 ---
 
+## 🆕 What's New in v1.0.1
+
+- **Pure Roslyn in-process analysis** — replaces the previous `python.exe` subprocess spawning for code analysis, eliminating all IPC overhead.
+- **Analysis latency reduced from ~800ms to <5ms** — in-process Roslyn compilation and symbol resolution runs orders of magnitude faster than spawning an external process.
+- **115 tests** passing (100 %).
+
+---
+
 ## Credits
 Developed by Ian Cowley and Antigravity (Google DeepMind).

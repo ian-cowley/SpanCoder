@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
     <IsTrimmable>true</IsTrimmable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,6 +19,20 @@
   </ItemGroup>
   <ItemGroup Condition="!Exists('..\..\..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj')">
     <PackageReference Include="Glacier.Grep" Version="1.0.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj')">
+    <ProjectReference Include="..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj')">
+    <PackageReference Include="Glacier.Graphics" Version="1.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj')">
+    <ProjectReference Include="..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj')">
+    <PackageReference Include="Glacier.Windowing" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>

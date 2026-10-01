@@ -1,12 +1,24 @@
 using System;
 using System.Buffers;
+using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using SpanCoder.Contracts;
+using Glacier.Graphics;
+using Glacier.Graphics.Raster;
+using Glacier.Graphics.Text;
+using Glacier.Graphics.Vector;
+using Glacier.Windowing;
+using GFont = Glacier.Graphics.Text.Font;
+using GPaint = Glacier.Graphics.Paint;
+using GRgba32 = Glacier.Graphics.Rgba32;
 
 namespace SpanCoder.Shell
 {
@@ -45,18 +57,95 @@ namespace SpanCoder.Shell
         private double _fontSize = 14.0;
         private Typeface _typeface = new Typeface("Consolas");
         public double CaretThickness { get; set; } = 2.0;
-        private static readonly IBrush KeywordBrush = new SolidColorBrush(Color.Parse("#569CD6"));
-        private static readonly IBrush CommentBrush = new SolidColorBrush(Color.Parse("#6A9955"));
-        private static readonly IBrush StringBrush = new SolidColorBrush(Color.Parse("#D69D85"));
-        private static readonly IBrush NumberBrush = new SolidColorBrush(Color.Parse("#B5CEA8"));
-        private static readonly IBrush TypeBrush = new SolidColorBrush(Color.Parse("#4EC9B0"));
-        private static readonly IBrush MethodBrush = new SolidColorBrush(Color.Parse("#DCDCAA"));
-        private static readonly IBrush PreprocessorBrush = new SolidColorBrush(Color.Parse("#9B9B9B"));
-        private static readonly IBrush AttributeBrush = new SolidColorBrush(Color.Parse("#4EC9B0"));
-        private static readonly IBrush TagBrush = new SolidColorBrush(Color.Parse("#569CD6"));
-        private static readonly IBrush SelectorBrush = new SolidColorBrush(Color.Parse("#D7BA7D"));
-        private static readonly IBrush PropertyBrush = new SolidColorBrush(Color.Parse("#9CDCFE"));
-        private static readonly IBrush HeadingBrush = new SolidColorBrush(Color.Parse("#569CD6"));
+
+        private TrueTypeFont? _glacierTrueTypeFont;
+        private GFont? _glacierFont;
+        private IWindow? _nativeWindow;
+        private Avalonia.Media.Imaging.WriteableBitmap? _softwareBackbuffer;
+
+        public TrueTypeFont? GlacierTrueTypeFont
+        {
+            get
+            {
+                EnsureGlacierFont();
+                return _glacierTrueTypeFont;
+            }
+        }
+
+        public GFont? GlacierFont
+        {
+            get
+            {
+                EnsureGlacierFont();
+                return _glacierFont;
+            }
+        }
+
+        public IWindow? NativeWindow => _nativeWindow;
+        public bool UseGlacierRendering { get; set; } = true;
+
+        private static IBrush? _keywordBrush;
+        private static IBrush? _commentBrush;
+        private static IBrush? _stringBrush;
+        private static IBrush? _numberBrush;
+        private static IBrush? _typeBrush;
+        private static IBrush? _methodBrush;
+        private static IBrush? _preprocessorBrush;
+        private static IBrush? _attributeBrush;
+        private static IBrush? _tagBrush;
+        private static IBrush? _selectorBrush;
+        private static IBrush? _propertyBrush;
+        private static IBrush? _headingBrush;
+
+        private static IBrush KeywordBrush => _keywordBrush ??= new SolidColorBrush(Color.Parse("#569CD6")).ToImmutable();
+        private static IBrush CommentBrush => _commentBrush ??= new SolidColorBrush(Color.Parse("#6A9955")).ToImmutable();
+        private static IBrush StringBrush => _stringBrush ??= new SolidColorBrush(Color.Parse("#D69D85")).ToImmutable();
+        private static IBrush NumberBrush => _numberBrush ??= new SolidColorBrush(Color.Parse("#B5CEA8")).ToImmutable();
+        private static IBrush TypeBrush => _typeBrush ??= new SolidColorBrush(Color.Parse("#4EC9B0")).ToImmutable();
+        private static IBrush MethodBrush => _methodBrush ??= new SolidColorBrush(Color.Parse("#DCDCAA")).ToImmutable();
+        private static IBrush PreprocessorBrush => _preprocessorBrush ??= new SolidColorBrush(Color.Parse("#9B9B9B")).ToImmutable();
+        private static IBrush AttributeBrush => _attributeBrush ??= new SolidColorBrush(Color.Parse("#4EC9B0")).ToImmutable();
+        private static IBrush TagBrush => _tagBrush ??= new SolidColorBrush(Color.Parse("#569CD6")).ToImmutable();
+        private static IBrush SelectorBrush => _selectorBrush ??= new SolidColorBrush(Color.Parse("#D7BA7D")).ToImmutable();
+        private static IBrush PropertyBrush => _propertyBrush ??= new SolidColorBrush(Color.Parse("#9CDCFE")).ToImmutable();
+        private static IBrush HeadingBrush => _headingBrush ??= new SolidColorBrush(Color.Parse("#569CD6")).ToImmutable();
+
+        private static readonly GPaint KeywordPaint = new(new GRgba32(0x56, 0x9C, 0xD6, 255));
+        private static readonly GPaint CommentPaint = new(new GRgba32(0x6A, 0x99, 0x55, 255));
+        private static readonly GPaint StringPaint = new(new GRgba32(0xD6, 0x9D, 0x85, 255));
+        private static readonly GPaint NumberPaint = new(new GRgba32(0xB5, 0xCE, 0xA8, 255));
+        private static readonly GPaint TypePaint = new(new GRgba32(0x4E, 0xC9, 0xB0, 255));
+        private static readonly GPaint MethodPaint = new(new GRgba32(0xDC, 0xDC, 0xAA, 255));
+        private static readonly GPaint PreprocessorPaint = new(new GRgba32(0x9B, 0x9B, 0x9B, 255));
+        private static readonly GPaint AttributePaint = new(new GRgba32(0x4E, 0xC9, 0xB0, 255));
+        private static readonly GPaint TagPaint = new(new GRgba32(0x56, 0x9C, 0xD6, 255));
+        private static readonly GPaint SelectorPaint = new(new GRgba32(0xD7, 0xBA, 0x7D, 255));
+        private static readonly GPaint PropertyPaint = new(new GRgba32(0x9C, 0xDC, 0xFE, 255));
+        private static readonly GPaint HeadingPaint = new(new GRgba32(0x56, 0x9C, 0xD6, 255));
+        private static readonly GPaint DefaultTextPaint = new(new GRgba32(211, 211, 211, 255));
+        private static readonly GPaint GhostTextPaint = new(new GRgba32(0x70, 0x70, 0x70, 255));
+        private static readonly GPaint GutterNumberPaint = new(new GRgba32(0x85, 0x85, 0x85, 255));
+
+        private static GPaint GetTokenPaint(TokenType type)
+        {
+            return type switch
+            {
+                TokenType.Keyword => KeywordPaint,
+                TokenType.Comment => CommentPaint,
+                TokenType.String => StringPaint,
+                TokenType.Number => NumberPaint,
+                TokenType.Type => TypePaint,
+                TokenType.Method => MethodPaint,
+                TokenType.Preprocessor => PreprocessorPaint,
+                TokenType.Attribute => AttributePaint,
+                TokenType.Tag => TagPaint,
+                TokenType.Selector => SelectorPaint,
+                TokenType.Property => PropertyPaint,
+                TokenType.Heading => HeadingPaint,
+                _ => DefaultTextPaint
+            };
+        }
+
         private double _charWidth = 0.0;
 
         public double CharWidth
@@ -65,6 +154,18 @@ namespace SpanCoder.Shell
             {
                 if (_charWidth <= 0.0)
                 {
+                    EnsureGlacierFont();
+                    if (_glacierFont != null)
+                    {
+                        ReadOnlySpan<char> measure = "X".AsSpan();
+                        float measured = _glacierFont.MeasureText(measure);
+                        if (measured > 0f)
+                        {
+                            _charWidth = measured;
+                            return _charWidth;
+                        }
+                    }
+
                     try
                     {
                         var measureText = new string('X', 100);
@@ -388,6 +489,16 @@ namespace SpanCoder.Shell
             _typeface = new Typeface(fontFamily);
             LineHeight = _fontSize + 6.0;
             _charWidth = 0.0;
+
+            if (_glacierTrueTypeFont != null)
+            {
+                _glacierFont = new GFont(_glacierTrueTypeFont, (float)_fontSize);
+            }
+            else
+            {
+                _glacierFont = null;
+                EnsureGlacierFont();
+            }
 
             bool wasVimEnabled = _vimEnabled;
             _vimEnabled = SettingsManager.Get<bool>("editor.vimEnabled", false);
@@ -1770,9 +1881,634 @@ namespace SpanCoder.Shell
             };
         }
 
+        public void AttachNativeWindow(IWindow window)
+        {
+            if (_nativeWindow != null)
+            {
+                _nativeWindow.InputReceived -= ProcessNativeInput;
+            }
+
+            _nativeWindow = window ?? throw new ArgumentNullException(nameof(window));
+            _nativeWindow.InputReceived += ProcessNativeInput;
+        }
+
+        public void DetachNativeWindow()
+        {
+            if (_nativeWindow != null)
+            {
+                _nativeWindow.InputReceived -= ProcessNativeInput;
+                _nativeWindow = null;
+            }
+        }
+
+        public void PollEvents()
+        {
+            _nativeWindow?.PollEvents();
+        }
+
+        public void ProcessNativeInput(InputEvent e)
+        {
+            switch (e.Type)
+            {
+                case InputEventType.MouseDown:
+                    HandleNativeMouseDown(e.KeyOrButton, e.X, e.Y);
+                    break;
+                case InputEventType.MouseMove:
+                    HandleNativeMouseMove(e.X, e.Y);
+                    break;
+                case InputEventType.MouseUp:
+                    HandleNativeMouseUp(e.KeyOrButton, e.X, e.Y);
+                    break;
+                case InputEventType.MouseWheel:
+                    HandleNativeMouseWheel(e.X, e.Y);
+                    break;
+                case InputEventType.KeyDown:
+                    HandleNativeKeyDown(e.KeyOrButton);
+                    break;
+                case InputEventType.KeyUp:
+                    HandleNativeKeyUp(e.KeyOrButton);
+                    break;
+            }
+        }
+
+        private void HandleNativeMouseDown(int button, float x, float y)
+        {
+            var pos = new Point(x, y);
+            var (clickLine, clickCol) = GetLineColFromPointer(pos);
+            MoveCaret(clickLine, clickCol);
+            _isDragging = true;
+            int clickOffset = GetOffsetFromPointer(pos);
+            _selectionStartOffset = clickOffset;
+            _selectionEndOffset = clickOffset;
+            _extraCarets.Clear();
+            InvalidateVisual();
+        }
+
+        private void HandleNativeMouseMove(float x, float y)
+        {
+            if (_isDragging)
+            {
+                var pos = new Point(x, y);
+                var (dragLine, dragCol) = GetLineColFromPointer(pos);
+                MoveCaret(dragLine, dragCol);
+                _selectionEndOffset = GetOffsetFromPointer(pos);
+                InvalidateVisual();
+            }
+        }
+
+        private void HandleNativeMouseUp(int button, float x, float y)
+        {
+            _isDragging = false;
+        }
+
+        private void HandleNativeMouseWheel(float deltaX, float deltaY)
+        {
+            ScrollY = Math.Max(0, ScrollY - (deltaY * LineHeight * 3.0));
+            ScrollX = Math.Max(0, ScrollX - (deltaX * CharWidth * 3.0));
+            InvalidateVisual();
+        }
+
+        private void HandleNativeKeyDown(int keyCode)
+        {
+            if (Document == null) return;
+
+            if (keyCode == 37) // Left
+            {
+                if (CaretCol > 0) MoveCaret(CaretLine, CaretCol - 1);
+            }
+            else if (keyCode == 39) // Right
+            {
+                MoveCaret(CaretLine, CaretCol + 1);
+            }
+            else if (keyCode == 38) // Up
+            {
+                if (CaretLine > 0) MoveCaret(CaretLine - 1, CaretCol);
+            }
+            else if (keyCode == 40) // Down
+            {
+                MoveCaret(CaretLine + 1, CaretCol);
+            }
+            else if (keyCode == 36) // Home
+            {
+                MoveCaret(CaretLine, 0);
+            }
+            else if (keyCode == 8) // Backspace
+            {
+                int minSel = Math.Min(_selectionStartOffset, _selectionEndOffset);
+                int maxSel = Math.Max(_selectionStartOffset, _selectionEndOffset);
+                if (minSel >= 0 && maxSel > minSel)
+                {
+                    TextDeleteReceived?.Invoke(minSel, maxSel - minSel);
+                    MoveCaretToOffset(minSel);
+                    _selectionStartOffset = -1;
+                    _selectionEndOffset = -1;
+                }
+                else if (CaretAbsoluteOffset > 0)
+                {
+                    TextDeleteReceived?.Invoke(CaretAbsoluteOffset - 1, 1);
+                    MoveCaretToOffset(CaretAbsoluteOffset - 1);
+                }
+            }
+            else if (keyCode == 46) // Delete
+            {
+                int minSel = Math.Min(_selectionStartOffset, _selectionEndOffset);
+                int maxSel = Math.Max(_selectionStartOffset, _selectionEndOffset);
+                if (minSel >= 0 && maxSel > minSel)
+                {
+                    TextDeleteReceived?.Invoke(minSel, maxSel - minSel);
+                    MoveCaretToOffset(minSel);
+                    _selectionStartOffset = -1;
+                    _selectionEndOffset = -1;
+                }
+                else if (CaretAbsoluteOffset < Document.Length)
+                {
+                    TextDeleteReceived?.Invoke(CaretAbsoluteOffset, 1);
+                }
+            }
+            else if (keyCode == 13) // Enter
+            {
+                TextInputReceived?.Invoke(CaretAbsoluteOffset, "\n");
+                MoveCaretToOffset(CaretAbsoluteOffset + 1);
+            }
+            else if (keyCode >= 32 && keyCode <= 126) // Printable ASCII
+            {
+                char ch = (char)keyCode;
+                TextInputReceived?.Invoke(CaretAbsoluteOffset, ch.ToString());
+                MoveCaretToOffset(CaretAbsoluteOffset + 1);
+            }
+
+            InvalidateVisual();
+        }
+
+        private void HandleNativeKeyUp(int keyCode)
+        {
+        }
+
+        public void EnsureGlacierFont()
+        {
+            if (_glacierFont != null) return;
+
+            if (_glacierTrueTypeFont == null)
+            {
+                _glacierTrueTypeFont = TryLoadSystemTrueTypeFont();
+            }
+
+            if (_glacierTrueTypeFont != null)
+            {
+                _glacierFont = new GFont(_glacierTrueTypeFont, (float)_fontSize);
+            }
+            else
+            {
+                _glacierFont = new GFont((float)_fontSize, "Consolas");
+            }
+        }
+
+        private static TrueTypeFont? TryLoadSystemTrueTypeFont()
+        {
+            string[] candidatePaths = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "consola.ttf"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "cascadia.ttf"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "CascadiaCode.ttf"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "arial.ttf"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "segoeui.ttf"),
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+                "/System/Library/Fonts/SFNSMono.ttf"
+            };
+
+            foreach (var path in candidatePaths)
+            {
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        byte[] fontBytes = File.ReadAllBytes(path);
+                        return new TrueTypeFont(fontBytes);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            try
+            {
+                return new TrueTypeFont(CreateFallbackMinimalTrueTypeFont());
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static byte[] CreateFallbackMinimalTrueTypeFont()
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms);
+
+            ushort numTables = 7;
+            writer.Write(new byte[] { 0x00, 0x01, 0x00, 0x00 });
+            WriteUInt16BE(writer, numTables);
+            WriteUInt16BE(writer, 64);
+            WriteUInt16BE(writer, 2);
+            WriteUInt16BE(writer, 48);
+
+            byte[] headTable = CreateHeadTable();
+            byte[] hheaTable = CreateHheaTable();
+            byte[] maxpTable = CreateMaxpTable();
+            byte[] hmtxTable = CreateHmtxTable();
+            byte[] cmapTable = CreateCmapTable();
+            byte[] glyfTable = CreateGlyfTable(out byte[] locaTable);
+
+            var tables = new (string Tag, byte[] Data)[]
+            {
+                ("cmap", cmapTable),
+                ("glyf", glyfTable),
+                ("head", headTable),
+                ("hhea", hheaTable),
+                ("hmtx", hmtxTable),
+                ("loca", locaTable),
+                ("maxp", maxpTable)
+            };
+
+            int currentOffset = 12 + numTables * 16;
+            foreach (var t in tables)
+            {
+                writer.Write(System.Text.Encoding.ASCII.GetBytes(t.Tag));
+                WriteUInt32BE(writer, 0);
+                WriteUInt32BE(writer, (uint)currentOffset);
+                WriteUInt32BE(writer, (uint)t.Data.Length);
+                currentOffset += (t.Data.Length + 3) & ~3;
+            }
+
+            foreach (var t in tables)
+            {
+                writer.Write(t.Data);
+                int pad = ((t.Data.Length + 3) & ~3) - t.Data.Length;
+                for (int p = 0; p < pad; p++) writer.Write((byte)0);
+            }
+
+            return ms.ToArray();
+        }
+
+        private static byte[] CreateHeadTable()
+        {
+            byte[] b = new byte[54];
+            BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(0, 4), 0x00010000);
+            BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(18, 2), 1000);
+            BinaryPrimitives.WriteInt16BigEndian(b.AsSpan(50, 2), 1);
+            return b;
+        }
+
+        private static byte[] CreateHheaTable()
+        {
+            byte[] b = new byte[36];
+            BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(0, 4), 0x00010000);
+            BinaryPrimitives.WriteInt16BigEndian(b.AsSpan(4, 2), 800);
+            BinaryPrimitives.WriteInt16BigEndian(b.AsSpan(6, 2), -200);
+            BinaryPrimitives.WriteInt16BigEndian(b.AsSpan(8, 2), 0);
+            BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(34, 2), 2);
+            return b;
+        }
+
+        private static byte[] CreateMaxpTable()
+        {
+            byte[] b = new byte[32];
+            BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(0, 4), 0x00010000);
+            BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(4, 2), 2);
+            return b;
+        }
+
+        private static byte[] CreateHmtxTable()
+        {
+            byte[] b = new byte[8];
+            BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(0, 2), 500);
+            BinaryPrimitives.WriteInt16BigEndian(b.AsSpan(2, 2), 0);
+            BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(4, 2), 600);
+            BinaryPrimitives.WriteInt16BigEndian(b.AsSpan(6, 2), 50);
+            return b;
+        }
+
+        private static byte[] CreateCmapTable()
+        {
+            using var ms = new MemoryStream();
+            using var w = new BinaryWriter(ms);
+
+            WriteUInt16BE(w, 0);
+            WriteUInt16BE(w, 1);
+            WriteUInt16BE(w, 3);
+            WriteUInt16BE(w, 1);
+            WriteUInt32BE(w, 12);
+
+            WriteUInt16BE(w, 4);
+            WriteUInt16BE(w, 32);
+            WriteUInt16BE(w, 0);
+            WriteUInt16BE(w, 4);
+            WriteUInt16BE(w, 4);
+            WriteUInt16BE(w, 1);
+            WriteUInt16BE(w, 0);
+
+            WriteUInt16BE(w, 65);
+            WriteUInt16BE(w, 0xFFFF);
+            WriteUInt16BE(w, 0);
+
+            WriteUInt16BE(w, 65);
+            WriteUInt16BE(w, 0xFFFF);
+
+            WriteUInt16BE(w, unchecked((ushort)(1 - 65)));
+            WriteUInt16BE(w, 1);
+
+            WriteUInt16BE(w, 0);
+            WriteUInt16BE(w, 0);
+
+            return ms.ToArray();
+        }
+
+        private static byte[] CreateGlyfTable(out byte[] locaTable)
+        {
+            using var ms = new MemoryStream();
+            using var w = new BinaryWriter(ms);
+
+            WriteInt16BE(w, 1);
+            WriteInt16BE(w, 0);
+            WriteInt16BE(w, 0);
+            WriteInt16BE(w, 600);
+            WriteInt16BE(w, 800);
+            WriteUInt16BE(w, 2);
+            WriteUInt16BE(w, 0);
+
+            w.Write((byte)0x01);
+            w.Write((byte)0x01);
+            w.Write((byte)0x01);
+
+            WriteInt16BE(w, 0);
+            WriteInt16BE(w, 300);
+            WriteInt16BE(w, 300);
+
+            WriteInt16BE(w, 0);
+            WriteInt16BE(w, 800);
+            WriteInt16BE(w, -800);
+
+            byte[] glyf = ms.ToArray();
+
+            byte[] loca = new byte[12];
+            BinaryPrimitives.WriteInt32BigEndian(loca.AsSpan(0, 4), 0);
+            BinaryPrimitives.WriteInt32BigEndian(loca.AsSpan(4, 4), 0);
+            BinaryPrimitives.WriteInt32BigEndian(loca.AsSpan(8, 4), glyf.Length);
+            locaTable = loca;
+
+            return glyf;
+        }
+
+        private static void WriteUInt16BE(BinaryWriter w, ushort val)
+        {
+            Span<byte> b = stackalloc byte[2];
+            BinaryPrimitives.WriteUInt16BigEndian(b, val);
+            w.Write(b);
+        }
+
+        private static void WriteInt16BE(BinaryWriter w, short val)
+        {
+            Span<byte> b = stackalloc byte[2];
+            BinaryPrimitives.WriteInt16BigEndian(b, val);
+            w.Write(b);
+        }
+
+        private static void WriteUInt32BE(BinaryWriter w, uint val)
+        {
+            Span<byte> b = stackalloc byte[4];
+            BinaryPrimitives.WriteUInt32BigEndian(b, val);
+            w.Write(b);
+        }
+
+        private static void FillRect(IGraphicsCanvas canvas, float x, float y, float w, float h, in GPaint paint)
+        {
+            if (w <= 0f || h <= 0f) return;
+            var path = new VectorPath();
+            path.AddRect(x, y, w, h);
+            canvas.FillPath(path, paint);
+        }
+
+        private static void DrawLine(IGraphicsCanvas canvas, float x1, float y1, float x2, float y2, in GPaint paint)
+        {
+            var path = new VectorPath();
+            path.AddLine(x1, y1, x2, y2);
+            canvas.DrawPath(path, paint);
+        }
+
+        public void Render(IGraphicsCanvas canvas)
+        {
+            float width = (float)Math.Max(1.0, Bounds.Width);
+            float height = (float)Math.Max(1.0, Bounds.Height);
+            RenderToGlacierCanvas(canvas, width, height);
+        }
+
+        public void RenderToGlacierCanvas(IGraphicsCanvas canvas, float width, float height)
+        {
+            if (canvas == null) throw new ArgumentNullException(nameof(canvas));
+
+            canvas.Clear(new GRgba32(0, 0, 0, 255));
+
+            var doc = Document;
+            if (doc == null) return;
+
+            int lineCount = doc.GetLineCount();
+            if (lineCount <= 0) return;
+
+            int visibleLineCount = _visibleLines.Count > 0 ? _visibleLines.Count : lineCount;
+            if (visibleLineCount <= 0) return;
+
+            float gutterWidth = (float)GetGutterWidth();
+            EnsureGlacierFont();
+            var font = _glacierFont!;
+
+            int startVisibleIndex = (int)(ScrollY / LineHeight);
+            int endVisibleIndex = (int)((ScrollY + height) / LineHeight) + 1;
+
+            startVisibleIndex = Math.Max(0, Math.Min(startVisibleIndex, visibleLineCount - 1));
+            endVisibleIndex = Math.Max(0, Math.Min(endVisibleIndex, visibleLineCount - 1));
+
+            // Render visible lines directly from PieceTable ReadOnlySpan<char>
+            for (int v = startVisibleIndex; v <= endVisibleIndex; v++)
+            {
+                int i = _visibleLines.Count > 0 ? _visibleLines[v] : v;
+                float yOffset = (float)((v * LineHeight) - ScrollY);
+
+                if (DebugActiveLine == i + 1)
+                {
+                    FillRect(canvas, gutterWidth, yOffset, width - gutterWidth, (float)LineHeight, new GPaint(new GRgba32(255, 255, 0, 40)));
+                }
+
+                var lineSpan = doc.GetLine(i, out bool isContiguous, out var rented);
+
+                int renderLen = lineSpan.Length;
+                if (renderLen > 0 && lineSpan[renderLen - 1] == '\n') renderLen--;
+                if (renderLen > 0 && lineSpan[renderLen - 1] == '\r') renderLen--;
+
+                // Selection highlight
+                int minOffset = Math.Min(_selectionStartOffset, _selectionEndOffset);
+                int maxOffset = Math.Max(_selectionStartOffset, _selectionEndOffset);
+                if (minOffset != -1 && maxOffset != -1 && minOffset != maxOffset)
+                {
+                    long lineStartOffset = doc.GetLineStart(i);
+                    long lineEndOffset = (i + 1 < lineCount) ? doc.GetLineStart(i + 1) : doc.Length;
+                    if (lineStartOffset < maxOffset && lineEndOffset > minOffset)
+                    {
+                        int selStartInLine = Math.Max((int)lineStartOffset, minOffset) - (int)lineStartOffset;
+                        int selEndInLine = Math.Min((int)lineEndOffset, maxOffset) - (int)lineStartOffset;
+
+                        int startCol = Math.Min(renderLen, selStartInLine);
+                        int endCol = Math.Min(renderLen, selEndInLine);
+
+                        float startX = (float)(gutterWidth + 10 + startCol * CharWidth - ScrollX);
+                        float endX = (float)(gutterWidth + 10 + endCol * CharWidth - ScrollX);
+                        if (selEndInLine > renderLen && i + 1 < lineCount)
+                        {
+                            endX += (float)CharWidth;
+                        }
+
+                        if (endX > startX)
+                        {
+                            FillRect(canvas, startX, yOffset, endX - startX, (float)LineHeight, new GPaint(new GRgba32(0x26, 0x4F, 0x78, 255)));
+                        }
+                    }
+                }
+
+                // Render line text directly via CpuGraphicsCanvas.DrawText
+                bool hasGhost = i == CaretLine && !string.IsNullOrEmpty(GhostText) && CaretAbsoluteOffset == GhostTextOffset;
+                float textStartX = (float)(gutterWidth + 10 - ScrollX);
+
+                if (renderLen > 0)
+                {
+                    ReadOnlySpan<char> span = lineSpan.Slice(0, renderLen);
+                    LineState startState = i > 0 && (i - 1) < _lineStates.Count ? _lineStates[i - 1] : LineState.Normal;
+                    string extension = System.IO.Path.GetExtension(doc.FilePath ?? "");
+                    var lexer = new DocumentLexer(span, extension, startState);
+
+                    int currentPos = 0;
+                    while (lexer.NextToken(out var token, out var nextState))
+                    {
+                        if (token.Start > currentPos)
+                        {
+                            var gapSpan = span.Slice(currentPos, token.Start - currentPos);
+                            float gapX = textStartX + (float)(currentPos * CharWidth);
+                            canvas.DrawText(gapSpan, gapX, yOffset, font, DefaultTextPaint);
+                        }
+
+                        var tokenSpan = span.Slice(token.Start, token.Length);
+                        float tokenX = textStartX + (float)(token.Start * CharWidth);
+                        var tokenPaint = GetTokenPaint(token.Type);
+                        canvas.DrawText(tokenSpan, tokenX, yOffset, font, tokenPaint);
+                        currentPos = token.Start + token.Length;
+                    }
+
+                    if (currentPos < span.Length)
+                    {
+                        var tailSpan = span.Slice(currentPos, span.Length - currentPos);
+                        float tailX = textStartX + (float)(currentPos * CharWidth);
+                        canvas.DrawText(tailSpan, tailX, yOffset, font, DefaultTextPaint);
+                    }
+                }
+
+                if (hasGhost)
+                {
+                    int caretColClamped = Math.Max(0, Math.Min(CaretCol, renderLen));
+                    float ghostX = textStartX + (float)(caretColClamped * CharWidth);
+                    canvas.DrawText(GhostText.AsSpan(), ghostX, yOffset, font, GhostTextPaint);
+                }
+
+                if (rented != null)
+                {
+                    ArrayPool<char>.Shared.Return(rented);
+                }
+            }
+
+            // Render Caret
+            if (_caretVisible)
+            {
+                int caretVisibleIndex = _docToVisualLine.Length > CaretLine ? _docToVisualLine[CaretLine] : CaretLine;
+                if (caretVisibleIndex >= startVisibleIndex && caretVisibleIndex <= endVisibleIndex)
+                {
+                    float caretX = (float)(gutterWidth + 10 + (CaretCol * CharWidth) - ScrollX);
+                    float caretY = (float)((caretVisibleIndex * LineHeight) - ScrollY);
+                    if (_vimEnabled && _vimMode == VimMode.Normal)
+                    {
+                        FillRect(canvas, caretX, caretY + 2, (float)CharWidth, (float)(LineHeight - 4), new GPaint(new GRgba32(211, 211, 211, 120)));
+                    }
+                    else
+                    {
+                        DrawLine(canvas, caretX, caretY + 2, caretX, caretY + (float)LineHeight - 2, new GPaint(new GRgba32(211, 211, 211, 255), PaintStyle.Stroke, (float)CaretThickness));
+                    }
+                }
+
+                foreach (var extra in _extraCarets)
+                {
+                    int extraVisibleIndex = _docToVisualLine.Length > extra.Line ? _docToVisualLine[extra.Line] : extra.Line;
+                    if (extraVisibleIndex >= startVisibleIndex && extraVisibleIndex <= endVisibleIndex)
+                    {
+                        float caretX = (float)(gutterWidth + 10 + (extra.Col * CharWidth) - ScrollX);
+                        float caretY = (float)((extraVisibleIndex * LineHeight) - ScrollY);
+                        if (_vimEnabled && _vimMode == VimMode.Normal)
+                        {
+                            FillRect(canvas, caretX, caretY + 2, (float)CharWidth, (float)(LineHeight - 4), new GPaint(new GRgba32(211, 211, 211, 120)));
+                        }
+                        else
+                        {
+                            DrawLine(canvas, caretX, caretY + 2, caretX, caretY + (float)LineHeight - 2, new GPaint(new GRgba32(211, 211, 211, 255), PaintStyle.Stroke, (float)CaretThickness));
+                        }
+                    }
+                }
+            }
+
+            // Render Gutter (Line Numbers)
+            if (_isGutterVisible)
+            {
+                FillRect(canvas, 0, 0, gutterWidth, height, new GPaint(new GRgba32(30, 30, 30, 255)));
+                DrawLine(canvas, gutterWidth, 0, gutterWidth, height, new GPaint(new GRgba32(50, 50, 50, 255), PaintStyle.Stroke, 1.0f));
+
+                Span<char> numSpan = stackalloc char[16];
+                for (int v = startVisibleIndex; v <= endVisibleIndex; v++)
+                {
+                    int lineNum = (_visibleLines.Count > 0 ? _visibleLines[v] : v) + 1;
+                    lineNum.TryFormat(numSpan, out int charsWritten);
+                    float lineNumX = gutterWidth - 10 - (float)(charsWritten * CharWidth);
+                    float lineNumY = (float)((v * LineHeight) - ScrollY);
+                    canvas.DrawText(numSpan.Slice(0, charsWritten), lineNumX, lineNumY, font, GutterNumberPaint);
+                }
+            }
+        }
+
         public override void Render(DrawingContext context)
         {
             base.Render(context);
+
+            if (UseGlacierRendering && Bounds.Width > 0 && Bounds.Height > 0)
+            {
+                int pxWidth = Math.Max(1, (int)Math.Ceiling(Bounds.Width));
+                int pxHeight = Math.Max(1, (int)Math.Ceiling(Bounds.Height));
+
+                if (_softwareBackbuffer == null || _softwareBackbuffer.PixelSize.Width != pxWidth || _softwareBackbuffer.PixelSize.Height != pxHeight)
+                {
+                    _softwareBackbuffer?.Dispose();
+                    _softwareBackbuffer = new Avalonia.Media.Imaging.WriteableBitmap(
+                        new PixelSize(pxWidth, pxHeight),
+                        new Vector(96, 96),
+                        PixelFormat.Rgba8888,
+                        AlphaFormat.Premul);
+                }
+
+                unsafe
+                {
+                    using var locked = _softwareBackbuffer.Lock();
+                    using var fb = new LinearFramebuffer((void*)locked.Address, pxWidth, pxHeight, locked.RowBytes);
+                    using var canvas = new CpuGraphicsCanvas(fb);
+                    RenderToGlacierCanvas(canvas, pxWidth, pxHeight);
+                }
+
+                context.DrawImage(_softwareBackbuffer, new Rect(0, 0, pxWidth, pxHeight), new Rect(0, 0, pxWidth, pxHeight));
+                return;
+            }
 
             // Background
             context.FillRectangle(Brushes.Black, Bounds);

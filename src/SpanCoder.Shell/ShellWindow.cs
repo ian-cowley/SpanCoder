@@ -17,12 +17,31 @@ using Avalonia.Controls.Templates;
 using SpanCoder.Contracts;
 using System.Buffers;
 using Avalonia.Styling;
+using Glacier.Windowing;
 
 
 namespace SpanCoder.Shell
 {
     public class ShellWindow : Window
     {
+        public IWindow? NativeWindow { get; private set; }
+
+        public void AttachNativeWindow(IWindow window)
+        {
+            NativeWindow = window ?? throw new ArgumentNullException(nameof(window));
+            _canvas?.AttachNativeWindow(window);
+            NativeWindow.Resized += (w, h) =>
+            {
+                Width = w;
+                Height = h;
+            };
+        }
+
+        public void PollEvents()
+        {
+            NativeWindow?.PollEvents();
+            _canvas?.PollEvents();
+        }
         internal EditorPane _activePane = null!;
         private readonly List<EditorPane> _editorPanes = new();
         private readonly List<TextEditorCanvas.ContextMenuItem> _extensionContextMenuItems = new();

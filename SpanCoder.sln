@@ -11,8 +11,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpanCoder.Shell", "src\Span
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpanCoder.Contracts", "src\SpanCoder.Contracts\SpanCoder.Contracts.csproj", "{70F96065-96E4-4467-92F5-A4E7D16CCAA3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glacier.Grep", "..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj", "{B045AF74-9C10-42A2-993E-09E1E43C404C}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpanCoder.SourceGenerators", "tools\SpanCoder.SourceGenerators\SpanCoder.SourceGenerators.csproj", "{2F404523-8016-4979-BE81-122F4A9F05EA}"
@@ -74,18 +72,6 @@ Global
 		{70F96065-96E4-4467-92F5-A4E7D16CCAA3}.Release|x64.Build.0 = Release|Any CPU
 		{70F96065-96E4-4467-92F5-A4E7D16CCAA3}.Release|x86.ActiveCfg = Release|Any CPU
 		{70F96065-96E4-4467-92F5-A4E7D16CCAA3}.Release|x86.Build.0 = Release|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Debug|x64.Build.0 = Debug|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Debug|x86.Build.0 = Debug|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Release|x64.ActiveCfg = Release|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Release|x64.Build.0 = Release|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Release|x86.ActiveCfg = Release|Any CPU
-		{B045AF74-9C10-42A2-993E-09E1E43C404C}.Release|x86.Build.0 = Release|Any CPU
 		{2F404523-8016-4979-BE81-122F4A9F05EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{2F404523-8016-4979-BE81-122F4A9F05EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2F404523-8016-4979-BE81-122F4A9F05EA}.Debug|x64.ActiveCfg = Debug|Any CPU

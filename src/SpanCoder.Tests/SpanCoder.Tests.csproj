@@ -27,17 +27,8 @@
     <ProjectReference Include="..\SpanCoder.App\SpanCoder.App.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj')">
-    <ProjectReference Include="..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="!Exists('..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj')">
+  <ItemGroup>
     <PackageReference Include="Glacier.Graphics" Version="1.0.0" />
-  </ItemGroup>
-
-  <ItemGroup Condition="Exists('..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj')">
-    <ProjectReference Include="..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="!Exists('..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj')">
     <PackageReference Include="Glacier.Windowing" Version="1.0.0" />
   </ItemGroup>
 

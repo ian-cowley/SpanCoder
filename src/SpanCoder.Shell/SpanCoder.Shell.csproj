@@ -14,24 +14,9 @@
     <ProjectReference Include="..\..\tools\SpanCoder.SourceGenerators\SpanCoder.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
-  <ItemGroup Condition="Exists('..\..\..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj')">
-    <ProjectReference Include="..\..\..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="!Exists('..\..\..\Glacier.Grep\src\Glacier.Grep\Glacier.Grep.csproj')">
+  <ItemGroup>
     <PackageReference Include="Glacier.Grep" Version="1.0.1" />
-  </ItemGroup>
-
-  <ItemGroup Condition="Exists('..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj')">
-    <ProjectReference Include="..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="!Exists('..\..\..\Glacier.Graphics\src\Glacier.Graphics\Glacier.Graphics.csproj')">
     <PackageReference Include="Glacier.Graphics" Version="1.0.0" />
-  </ItemGroup>
-
-  <ItemGroup Condition="Exists('..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj')">
-    <ProjectReference Include="..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="!Exists('..\..\..\Glacier.Windowing\src\Glacier.Windowing\Glacier.Windowing.csproj')">
     <PackageReference Include="Glacier.Windowing" Version="1.0.0" />
   </ItemGroup>
 

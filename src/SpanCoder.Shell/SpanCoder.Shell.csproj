@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <PackageReference Include="Glacier.Grep" Version="1.0.1" />
-    <PackageReference Include="Glacier.Graphics" Version="1.0.0" />
+    <PackageReference Include="Glacier.Graphics" Version="1.0.2" />
     <PackageReference Include="Glacier.Windowing" Version="1.0.0" />
   </ItemGroup>
 

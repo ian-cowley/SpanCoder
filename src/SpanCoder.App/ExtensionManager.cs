@@ -48,7 +48,7 @@ namespace SpanCoder.App
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
             Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
-            Console.WriteLine($"[ExtensionManager] Listening on port {Port}");
+            SpanCoderDiagnostics.LogInformation($"[ExtensionManager] Listening on port {Port}");
 
             // 2. Start Accept Loop
             Task.Run(() => AcceptLoop(Port));
@@ -87,7 +87,7 @@ namespace SpanCoder.App
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ExtensionManager] Failed to launch plugin in {dir}: {ex.Message}");
+                        SpanCoderDiagnostics.LogError($"[ExtensionManager] Failed to launch plugin in {dir}: {ex.Message}", ex);
                     }
                 }
             }
@@ -107,7 +107,7 @@ namespace SpanCoder.App
                 arguments = $"\"{path}\" --port {port}";
             }
 
-            Console.WriteLine($"[ExtensionManager] Launching plugin process: {executable} {arguments}");
+            SpanCoderDiagnostics.LogInformation($"[ExtensionManager] Launching plugin process: {executable} {arguments}");
             var psi = new ProcessStartInfo
             {
                 FileName = executable,
@@ -150,7 +150,7 @@ namespace SpanCoder.App
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ExtensionManager] Failed to launch dynamic plugin: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[ExtensionManager] Failed to launch dynamic plugin: {ex.Message}", ex);
                 }
             }
         }
@@ -209,7 +209,7 @@ namespace SpanCoder.App
             {
                 if (!_cts.Token.IsCancellationRequested)
                 {
-                    Console.WriteLine($"[ExtensionManager] Accept error: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[ExtensionManager] Accept error: {ex.Message}", ex);
                 }
             }
         }
@@ -233,7 +233,7 @@ namespace SpanCoder.App
 
                 if (!BinaryMessageSerializer.TryParseHeader(headerBuffer, out var header) || header.Type != MessageTypes.RegisterExtension)
                 {
-                    Console.WriteLine("[ExtensionManager] Client connection rejected: First message was not RegisterExtension.");
+                    SpanCoderDiagnostics.LogWarning("[ExtensionManager] Client connection rejected: First message was not RegisterExtension.");
                     return;
                 }
 
@@ -251,14 +251,14 @@ namespace SpanCoder.App
                 // Verify token presence and association
                 if (string.IsNullOrEmpty(token) || !_pendingTokens.TryRemove(token, out var expectedId) || expectedId != manifest.Id)
                 {
-                    Console.WriteLine($"[ExtensionManager] Client connection rejected: Invalid or unauthorized token '{token}' for extension '{manifest.Id}'.");
+                    SpanCoderDiagnostics.LogWarning($"[ExtensionManager] Client connection rejected: Invalid or unauthorized token '{token}' for extension '{manifest.Id}'.");
                     return;
                 }
 
                 registeredExtensionId = manifest.Id;
                 _activeExtensions[manifest.Id] = (client, stream, new object());
 
-                Console.WriteLine($"[ExtensionManager] Extension '{manifest.Id}' authenticated and registered successfully.");
+                SpanCoderDiagnostics.LogInformation($"[ExtensionManager] Extension '{manifest.Id}' authenticated and registered successfully.");
                 ExtensionRegistered?.Invoke(manifest.Id, manifest);
 
                 // 2. Enter standard message loop (no handshake timeout, only host shutdown cancellation)
@@ -306,17 +306,17 @@ namespace SpanCoder.App
             }
             catch (OperationCanceledException)
             {
-                Console.WriteLine("[ExtensionManager] Extension connection closed (canceled).");
+                SpanCoderDiagnostics.LogInformation("[ExtensionManager] Extension connection closed (canceled).");
             }
             catch (Exception ex)
             {
                 if (_cts.Token.IsCancellationRequested)
                 {
-                    Console.WriteLine("[ExtensionManager] Extension connection closed during shutdown.");
+                    SpanCoderDiagnostics.LogInformation("[ExtensionManager] Extension connection closed during shutdown.");
                 }
                 else
                 {
-                    Console.WriteLine($"[ExtensionManager] Extension communication error: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[ExtensionManager] Extension communication error: {ex.Message}", ex);
                 }
             }
             finally
@@ -360,13 +360,13 @@ namespace SpanCoder.App
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ExtensionManager] Failed to dispatch command '{commandId}' to extension '{extensionId}': {ex.Message}");
+                        SpanCoderDiagnostics.LogError($"[ExtensionManager] Failed to dispatch command '{commandId}' to extension '{extensionId}': {ex.Message}", ex);
                     }
                 }
             }
             else
             {
-                Console.WriteLine($"[ExtensionManager] Cannot execute command '{commandId}': Extension '{extensionId}' is not connected.");
+                SpanCoderDiagnostics.LogWarning($"[ExtensionManager] Cannot execute command '{commandId}': Extension '{extensionId}' is not connected.");
             }
         }
 
@@ -389,13 +389,13 @@ namespace SpanCoder.App
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ExtensionManager] Failed to dispatch command '{commandId}' with context to extension '{extensionId}': {ex.Message}");
+                        SpanCoderDiagnostics.LogError($"[ExtensionManager] Failed to dispatch command '{commandId}' with context to extension '{extensionId}': {ex.Message}", ex);
                     }
                 }
             }
             else
             {
-                Console.WriteLine($"[ExtensionManager] Cannot execute command '{commandId}' with context: Extension '{extensionId}' is not connected.");
+                SpanCoderDiagnostics.LogWarning($"[ExtensionManager] Cannot execute command '{commandId}' with context: Extension '{extensionId}' is not connected.");
             }
         }
 
@@ -433,14 +433,14 @@ namespace SpanCoder.App
                 }
                 else
                 {
-                    Console.WriteLine($"[ExtensionManager] Formatting request timed out for extension '{extensionId}' and document {documentId}.");
+                    SpanCoderDiagnostics.LogWarning($"[ExtensionManager] Formatting request timed out for extension '{extensionId}' and document {documentId}.");
                     _pendingFormatRequests.TryRemove(key, out _);
                     return null;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ExtensionManager] Error during formatting request: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[ExtensionManager] Error during formatting request: {ex.Message}", ex);
                 _pendingFormatRequests.TryRemove(key, out _);
                 return null;
             }
@@ -604,7 +604,7 @@ namespace SpanCoder.App
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ExtensionManager] Failed to send setting changed notification to '{extensionId}': {ex.Message}");
+                        SpanCoderDiagnostics.LogError($"[ExtensionManager] Failed to send setting changed notification to '{extensionId}': {ex.Message}", ex);
                     }
                 }
             }

@@ -6,6 +6,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Threading;
+using SpanCoder.Contracts;
 
 namespace SpanCoder.Shell
 {
@@ -88,7 +89,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PerformanceGraphs] Error getting diagnostics: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[PerformanceGraphs] Error getting diagnostics: {ex.Message}");
             }
         }
 

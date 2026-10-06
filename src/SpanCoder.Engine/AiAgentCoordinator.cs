@@ -56,7 +56,7 @@ namespace SpanCoder.Engine
                     _activeCts.Dispose();
                     _activeCts = null;
                 }
-                Console.WriteLine("[AiAgentCoordinator] Stop requested. Agent loop terminated.");
+                SpanCoderDiagnostics.LogInformation("[AiAgentCoordinator] Stop requested. Agent loop terminated.");
 
                 foreach (var tcs in _pendingApprovals.Values)
                 {
@@ -78,7 +78,7 @@ namespace SpanCoder.Engine
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AiAgentCoordinator] Error handling tool approval: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[AiAgentCoordinator] Error handling tool approval: {ex.Message}", ex);
             }
         }
 
@@ -181,7 +181,7 @@ namespace SpanCoder.Engine
                             string toolName = toolCall.Function.Name;
                             string args = toolCall.Function.Arguments;
 
-                            Console.WriteLine($"[AiAgent] Executing tool '{toolName}' with arguments: {args}");
+                            SpanCoderDiagnostics.LogInformation($"[AiAgent] Executing tool '{toolName}' with arguments: {args}");
 
                             // Run tool
                             string toolOutput;
@@ -382,7 +382,7 @@ namespace SpanCoder.Engine
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AiAgentCoordinator] Error sending response packet: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[AiAgentCoordinator] Error sending response packet: {ex.Message}", ex);
             }
         }
 

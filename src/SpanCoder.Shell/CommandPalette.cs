@@ -401,7 +401,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[CommandPalette] File scan error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[CommandPalette] File scan error: {ex.Message}");
             }
 
             lock (_filesLock)

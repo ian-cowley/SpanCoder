@@ -1,0 +1,1 @@
+// SpanCoder.Contracts diagnostics

@@ -13,6 +13,8 @@ namespace SpanCoder.Extensions.Languages
 
         static async Task Main(string[] args)
         {
+            SpanCoderDiagnostics.Logger = new ConsoleGlacierLogger(LogLevel.Information);
+
             int port = 0;
             for (int i = 0; i < args.Length; i++)
             {
@@ -24,11 +26,11 @@ namespace SpanCoder.Extensions.Languages
 
             if (port == 0)
             {
-                Console.WriteLine("Usage: plugin --port <port>");
+                SpanCoderDiagnostics.LogInformation("Usage: plugin --port <port>");
                 return;
             }
 
-            Console.WriteLine($"[LanguagesPlugin] Connecting to port {port}...");
+            SpanCoderDiagnostics.LogInformation($"[LanguagesPlugin] Connecting to port {port}...");
             
             TcpClient? client = null;
             NetworkStream? stream = null;
@@ -43,7 +45,7 @@ namespace SpanCoder.Extensions.Languages
                 string manifestPath = Path.Combine(exeDir, "plugin.json");
                 if (!File.Exists(manifestPath))
                 {
-                    Console.WriteLine($"[LanguagesPlugin] Manifest not found at {manifestPath}");
+                    SpanCoderDiagnostics.LogError($"[LanguagesPlugin] Manifest not found at {manifestPath}");
                     return;
                 }
 
@@ -53,7 +55,7 @@ namespace SpanCoder.Extensions.Languages
                 byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
                 int len = BinaryMessageSerializer.WriteRegisterExtension(buffer, token, jsonBytes);
 
-                Console.WriteLine("[LanguagesPlugin] Registering extension...");
+                SpanCoderDiagnostics.LogInformation("[LanguagesPlugin] Registering extension...");
                 await SendMessageAsync(stream, buffer, len);
 
                 // Start Read Loop
@@ -90,7 +92,7 @@ namespace SpanCoder.Extensions.Languages
                             commandId = BinaryMessageSerializer.ParseExecuteExtensionCommand(payload);
                         }
 
-                        Console.WriteLine($"[LanguagesPlugin] Received command: {commandId}");
+                        SpanCoderDiagnostics.LogInformation($"[LanguagesPlugin] Received command: {commandId}");
 
                         if (commandId == "languages.runPython")
                         {
@@ -107,7 +109,7 @@ namespace SpanCoder.Extensions.Languages
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[LanguagesPlugin] Error running script: {ex.Message}");
+                                    SpanCoderDiagnostics.LogError($"[LanguagesPlugin] Error running script: {ex.Message}");
                                     await UpdateStatusBarAsync(stream, "languages-status", "Py: Run Error", ex.Message);
                                 }
                             });
@@ -127,7 +129,7 @@ namespace SpanCoder.Extensions.Languages
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[LanguagesPlugin] Error running build: {ex.Message}");
+                                    SpanCoderDiagnostics.LogError($"[LanguagesPlugin] Error running build: {ex.Message}");
                                     await UpdateStatusBarAsync(stream, "languages-status", "Cargo: Build Error", ex.Message);
                                 }
                             });
@@ -136,13 +138,13 @@ namespace SpanCoder.Extensions.Languages
                     else if (header.Type == MessageTypes.ExtensionSettingChanged)
                     {
                         BinaryMessageSerializer.ParseExtensionSettingChanged(payload, out string settingId, out string value);
-                        Console.WriteLine($"[LanguagesPlugin] Setting changed: {settingId} = {value}");
+                        SpanCoderDiagnostics.LogInformation($"[LanguagesPlugin] Setting changed: {settingId} = {value}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[LanguagesPlugin] Error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LanguagesPlugin] Error: {ex.Message}");
             }
             finally
             {

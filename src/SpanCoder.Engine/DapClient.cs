@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using SpanCoder.Contracts;
 
 namespace SpanCoder.Engine
 {
@@ -109,7 +110,7 @@ namespace SpanCoder.Engine
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DapClient] Failed to start: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[DapClient] Failed to start: {ex.Message}", ex);
             }
         }
 
@@ -205,7 +206,7 @@ namespace SpanCoder.Engine
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DapClient] Error writing to server: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[DapClient] Error writing to server: {ex.Message}", ex);
             }
         }
 
@@ -247,7 +248,7 @@ namespace SpanCoder.Engine
             {
                 if (!_cts.Token.IsCancellationRequested)
                 {
-                    Console.WriteLine($"[DapClient] Read loop error: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[DapClient] Read loop error: {ex.Message}", ex);
                 }
             }
         }
@@ -319,7 +320,7 @@ namespace SpanCoder.Engine
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DapClient] Message processing error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[DapClient] Message processing error: {ex.Message}", ex);
             }
         }
 
@@ -383,7 +384,7 @@ namespace SpanCoder.Engine
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DapClient] Error querying state: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[DapClient] Error querying state: {ex.Message}", ex);
             }
         }
 
@@ -408,7 +409,7 @@ namespace SpanCoder.Engine
                 {
                     string? line = reader.ReadLine();
                     if (line == null) break;
-                    Console.WriteLine($"[DapClient-Err] {line}");
+                    SpanCoderDiagnostics.LogWarning($"[DapClient-Err] {line}");
                 }
             }
             catch { }

@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
+using SpanCoder.Contracts;
 
 namespace SpanCoder.Shell
 {
@@ -50,7 +51,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PtyHost] Native PTY start failed: {ex.Message}. Falling back to standard redirection.");
+                SpanCoderDiagnostics.LogWarning($"[PtyHost] Native PTY start failed: {ex.Message}. Falling back to standard redirection.");
             }
 
             // Fallback to standard process redirection
@@ -86,7 +87,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PtyHost] Write failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[PtyHost] Write failed: {ex.Message}");
             }
         }
 

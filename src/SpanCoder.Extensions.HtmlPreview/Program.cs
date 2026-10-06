@@ -14,6 +14,8 @@ namespace SpanCoder.Extensions.HtmlPreview
 
         static async Task Main(string[] args)
         {
+            SpanCoderDiagnostics.Logger = new ConsoleGlacierLogger(LogLevel.Information);
+
             int port = 0;
             for (int i = 0; i < args.Length; i++)
             {
@@ -25,11 +27,11 @@ namespace SpanCoder.Extensions.HtmlPreview
 
             if (port == 0)
             {
-                Console.WriteLine("Usage: plugin --port <port>");
+                SpanCoderDiagnostics.LogInformation("Usage: plugin --port <port>");
                 return;
             }
 
-            Console.WriteLine($"[HtmlPreviewPlugin] Connecting to port {port}...");
+            SpanCoderDiagnostics.LogInformation($"[HtmlPreviewPlugin] Connecting to port {port}...");
 
             TcpClient? client = null;
             NetworkStream? stream = null;
@@ -43,7 +45,7 @@ namespace SpanCoder.Extensions.HtmlPreview
                 string manifestPath = Path.Combine(exeDir, "plugin.json");
                 if (!File.Exists(manifestPath))
                 {
-                    Console.WriteLine($"[HtmlPreviewPlugin] Manifest not found at {manifestPath}");
+                    SpanCoderDiagnostics.LogError($"[HtmlPreviewPlugin] Manifest not found at {manifestPath}");
                     return;
                 }
 
@@ -53,7 +55,7 @@ namespace SpanCoder.Extensions.HtmlPreview
                 byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
                 int len = BinaryMessageSerializer.WriteRegisterExtension(buffer, token, jsonBytes);
 
-                Console.WriteLine("[HtmlPreviewPlugin] Registering extension...");
+                SpanCoderDiagnostics.LogInformation("[HtmlPreviewPlugin] Registering extension...");
                 await SendMessageAsync(stream, buffer, len);
 
                 byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
@@ -77,7 +79,7 @@ namespace SpanCoder.Extensions.HtmlPreview
                     if (header.Type == MessageTypes.ExecuteExtensionCommandWithContext)
                     {
                         BinaryMessageSerializer.ParseExecuteExtensionCommandWithContext(payload, out string commandId, out string activeFilePath, out string activeContent);
-                        Console.WriteLine($"[HtmlPreviewPlugin] Received command: {commandId} for path {activeFilePath}");
+                        SpanCoderDiagnostics.LogInformation($"[HtmlPreviewPlugin] Received command: {commandId} for path {activeFilePath}");
 
                         if (commandId == "html-preview.show")
                         {
@@ -98,13 +100,13 @@ namespace SpanCoder.Extensions.HtmlPreview
                     else if (header.Type == MessageTypes.ExtensionSettingChanged)
                     {
                         BinaryMessageSerializer.ParseExtensionSettingChanged(payload, out string settingId, out string value);
-                        Console.WriteLine($"[HtmlPreviewPlugin] Setting changed: {settingId} = {value}");
+                        SpanCoderDiagnostics.LogInformation($"[HtmlPreviewPlugin] Setting changed: {settingId} = {value}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[HtmlPreviewPlugin] Error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[HtmlPreviewPlugin] Error: {ex.Message}");
             }
             finally
             {

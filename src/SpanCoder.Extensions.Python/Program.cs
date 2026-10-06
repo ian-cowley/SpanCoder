@@ -15,6 +15,8 @@ namespace SpanCoder.Extensions.Python
 
         static async Task Main(string[] args)
         {
+            SpanCoderDiagnostics.Logger = new ConsoleGlacierLogger(LogLevel.Information);
+
             int port = 0;
             for (int i = 0; i < args.Length; i++)
             {
@@ -26,11 +28,11 @@ namespace SpanCoder.Extensions.Python
 
             if (port == 0)
             {
-                Console.WriteLine("Usage: plugin --port <port>");
+                SpanCoderDiagnostics.LogInformation("Usage: plugin --port <port>");
                 return;
             }
 
-            Console.WriteLine($"[PythonPlugin] Connecting to port {port}...");
+            SpanCoderDiagnostics.LogInformation($"[PythonPlugin] Connecting to port {port}...");
 
             TcpClient? client = null;
             NetworkStream? stream = null;
@@ -44,7 +46,7 @@ namespace SpanCoder.Extensions.Python
                 string manifestPath = Path.Combine(exeDir, "plugin.json");
                 if (!File.Exists(manifestPath))
                 {
-                    Console.WriteLine($"[PythonPlugin] Manifest not found at {manifestPath}");
+                    SpanCoderDiagnostics.LogError($"[PythonPlugin] Manifest not found at {manifestPath}");
                     return;
                 }
 
@@ -54,7 +56,7 @@ namespace SpanCoder.Extensions.Python
                 byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
                 int len = BinaryMessageSerializer.WriteRegisterExtension(buffer, token, jsonBytes);
 
-                Console.WriteLine("[PythonPlugin] Registering extension...");
+                SpanCoderDiagnostics.LogInformation("[PythonPlugin] Registering extension...");
                 await SendMessageAsync(stream, buffer, len);
 
                 byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
@@ -78,7 +80,7 @@ namespace SpanCoder.Extensions.Python
                     if (header.Type == MessageTypes.ExecuteExtensionCommandWithContext)
                     {
                         BinaryMessageSerializer.ParseExecuteExtensionCommandWithContext(payload, out string commandId, out string activeFilePath, out string activeContent);
-                        Console.WriteLine($"[PythonPlugin] Received command: {commandId} for path {activeFilePath}");
+                        SpanCoderDiagnostics.LogInformation($"[PythonPlugin] Received command: {commandId} for path {activeFilePath}");
 
                         if (commandId == "python.run")
                         {
@@ -101,7 +103,7 @@ namespace SpanCoder.Extensions.Python
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[PythonPlugin] Error running script: {ex.Message}");
+                                    SpanCoderDiagnostics.LogError($"[PythonPlugin] Error running script: {ex.Message}");
                                     await UpdateStatusBarAsync(stream, "python-status", "Python: Run Error", ex.Message);
                                 }
                             });
@@ -110,13 +112,13 @@ namespace SpanCoder.Extensions.Python
                     else if (header.Type == MessageTypes.ExtensionSettingChanged)
                     {
                         BinaryMessageSerializer.ParseExtensionSettingChanged(payload, out string settingId, out string value);
-                        Console.WriteLine($"[PythonPlugin] Setting changed: {settingId} = {value}");
+                        SpanCoderDiagnostics.LogInformation($"[PythonPlugin] Setting changed: {settingId} = {value}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PythonPlugin] Error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[PythonPlugin] Error: {ex.Message}");
             }
             finally
             {

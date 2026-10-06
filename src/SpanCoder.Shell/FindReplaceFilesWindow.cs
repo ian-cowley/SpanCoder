@@ -12,6 +12,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Glacier.Grep;
+using SpanCoder.Contracts;
 
 namespace SpanCoder.Shell
 {
@@ -548,7 +549,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[FindReplaceFilesWindow] Search error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[FindReplaceFilesWindow] Search error: {ex.Message}");
             }
         }
 

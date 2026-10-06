@@ -117,7 +117,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"Failed to start LSP process: {ex.ToString()}");
-                Console.WriteLine($"[LspClient] Failed to start LSP client: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] Failed to start LSP client: {ex.Message}", ex);
             }
         }
 
@@ -201,7 +201,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"Completion request failed: {ex.Message}");
-                Console.WriteLine($"[LspClient] Completion request failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] Completion request failed: {ex.Message}", ex);
             }
             return Array.Empty<AutocompleteItem>();
         }
@@ -258,7 +258,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"Hover request failed: {ex.Message}");
-                Console.WriteLine($"[LspClient] Hover request failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] Hover request failed: {ex.Message}", ex);
             }
             return null;
         }
@@ -304,7 +304,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"Definition request failed: {ex.Message}");
-                Console.WriteLine($"[LspClient] Definition request failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] Definition request failed: {ex.Message}", ex);
             }
             return null;
         }
@@ -343,7 +343,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"References request failed: {ex.Message}");
-                Console.WriteLine($"[LspClient] References request failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] References request failed: {ex.Message}", ex);
             }
             return Array.Empty<ReferenceItem>();
         }
@@ -397,7 +397,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"Rename request failed: {ex.Message}");
-                Console.WriteLine($"[LspClient] Rename request failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] Rename request failed: {ex.Message}", ex);
             }
             return Array.Empty<LspTextEdit>();
         }
@@ -448,7 +448,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"Document symbols request failed: {ex.Message}");
-                Console.WriteLine($"[LspClient] Document symbols request failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] Document symbols request failed: {ex.Message}", ex);
             }
             return Array.Empty<DocumentSymbolItem>();
         }
@@ -484,7 +484,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"FoldingRange request failed: {ex.Message}");
-                Console.WriteLine($"[LspClient] FoldingRange request failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] FoldingRange request failed: {ex.Message}", ex);
             }
             return Array.Empty<FoldingRangeItem>();
         }
@@ -549,7 +549,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"SendRaw error: {ex.ToString()}");
-                Console.WriteLine($"[LspClient] Error writing to LSP server: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] Error writing to LSP server: {ex.Message}", ex);
             }
         }
 
@@ -603,7 +603,7 @@ namespace SpanCoder.Engine
                 Log($"ReadLoop error: {ex.ToString()}");
                 if (!_cts.Token.IsCancellationRequested)
                 {
-                    Console.WriteLine($"[LspClient] Error reading from LSP server: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[LspClient] Error reading from LSP server: {ex.Message}", ex);
                 }
             }
         }
@@ -687,7 +687,7 @@ namespace SpanCoder.Engine
             catch (Exception ex)
             {
                 Log($"ProcessMessage parsing error: {ex.ToString()}");
-                Console.WriteLine($"[LspClient] Error processing LSP message: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LspClient] Error processing LSP message: {ex.Message}", ex);
             }
         }
 
@@ -699,7 +699,7 @@ namespace SpanCoder.Engine
                 {
                     string? line = reader.ReadLine();
                     if (line == null) break;
-                    Console.WriteLine($"[LspClient-Err] {line}");
+                    SpanCoderDiagnostics.LogWarning($"[LspClient-Err] {line}");
                 }
             }
             catch { }

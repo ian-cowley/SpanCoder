@@ -30,6 +30,8 @@ namespace SpanCoder.Contracts
 
         public static void Log(string message)
         {
+            SpanCoderDiagnostics.LogInformation(message);
+
             if (!Enabled) return;
 
             lock (LockObj)
@@ -46,7 +48,6 @@ namespace SpanCoder.Contracts
                 }
                 catch { }
             }
-            Console.WriteLine(message);
         }
     }
 }

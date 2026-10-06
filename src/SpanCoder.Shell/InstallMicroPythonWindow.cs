@@ -10,6 +10,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using SpanCoder.Contracts;
 
 namespace SpanCoder.Shell
 {
@@ -360,7 +361,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception downloadEx)
             {
-                Console.WriteLine($"[InstallWindow] Download failed, using fallback dummy UF2: {downloadEx.Message}");
+                SpanCoderDiagnostics.LogWarning($"[InstallWindow] Download failed, using fallback dummy UF2: {downloadEx.Message}");
                 _infoText.Text = "Download failed (offline). Generating fallback firmware...";
                 _infoText.Foreground = Brushes.Orange;
                 fileBytes = GenerateDummyUf2();
@@ -403,7 +404,7 @@ namespace SpanCoder.Shell
             {
                 if (ex is IOException || ex is DirectoryNotFoundException)
                 {
-                    Console.WriteLine($"[InstallWindow] Drive disconnected. Auto-rebooting board: {ex.Message}");
+                    SpanCoderDiagnostics.LogInformation($"[InstallWindow] Drive disconnected. Auto-rebooting board: {ex.Message}");
                 }
                 else
                 {

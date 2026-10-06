@@ -445,7 +445,7 @@ namespace SpanCoder.Tests
             // Assertions
             Assert.Single(pane.OpenDocuments);
             Assert.Equal(doc2, pane.ActiveDocument);
-            Assert.Equal(1, pane.TabsContainer.Children.Count);
+            Assert.Single(pane.TabsContainer.Children);
 
             window.Close();
         }

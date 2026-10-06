@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using SpanCoder.Contracts;
 
 namespace SpanCoder.Shell
 {
@@ -113,7 +114,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[KeybindingsManager] Failed to load keybindings: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[KeybindingsManager] Failed to load keybindings: {ex.Message}");
             }
         }
 
@@ -142,7 +143,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[KeybindingsManager] Failed to save keybindings: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[KeybindingsManager] Failed to save keybindings: {ex.Message}");
             }
         }
         public static string NormalizeShortcut(string shortcut)

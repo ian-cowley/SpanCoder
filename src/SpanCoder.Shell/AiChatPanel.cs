@@ -788,7 +788,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[AiChatPanel] Error parsing chat response: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[AiChatPanel] Error parsing chat response: {ex.Message}");
                 }
             });
         }
@@ -841,7 +841,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[AiChatPanel] Error parsing tool execution event: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[AiChatPanel] Error parsing tool execution event: {ex.Message}");
                 }
             });
         }
@@ -863,7 +863,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AiChatPanel] Error sending tool approval: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[AiChatPanel] Error sending tool approval: {ex.Message}");
             }
         }
 

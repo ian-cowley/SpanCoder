@@ -16,6 +16,8 @@ namespace SpanCoder.Extensions.Prettier
 
         static async Task Main(string[] args)
         {
+            SpanCoderDiagnostics.Logger = new ConsoleGlacierLogger(LogLevel.Information);
+
             int port = 0;
             for (int i = 0; i < args.Length; i++)
             {
@@ -27,11 +29,11 @@ namespace SpanCoder.Extensions.Prettier
 
             if (port == 0)
             {
-                Console.WriteLine("Usage: plugin --port <port>");
+                SpanCoderDiagnostics.LogInformation("Usage: plugin --port <port>");
                 return;
             }
 
-            Console.WriteLine($"[PrettierPlugin] Connecting to port {port}...");
+            SpanCoderDiagnostics.LogInformation($"[PrettierPlugin] Connecting to port {port}...");
 
             TcpClient? client = null;
             NetworkStream? stream = null;
@@ -45,7 +47,7 @@ namespace SpanCoder.Extensions.Prettier
                 string manifestPath = Path.Combine(exeDir, "plugin.json");
                 if (!File.Exists(manifestPath))
                 {
-                    Console.WriteLine($"[PrettierPlugin] Manifest not found at {manifestPath}");
+                    SpanCoderDiagnostics.LogError($"[PrettierPlugin] Manifest not found at {manifestPath}");
                     return;
                 }
 
@@ -55,7 +57,7 @@ namespace SpanCoder.Extensions.Prettier
                 byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + sizeof(int) + token.Length * sizeof(char) + sizeof(int) + jsonBytes.Length];
                 int len = BinaryMessageSerializer.WriteRegisterExtension(buffer, token, jsonBytes);
 
-                Console.WriteLine("[PrettierPlugin] Registering extension...");
+                SpanCoderDiagnostics.LogInformation("[PrettierPlugin] Registering extension...");
                 await SendMessageAsync(stream, buffer, len);
 
                 byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
@@ -79,17 +81,17 @@ namespace SpanCoder.Extensions.Prettier
                     if (header.Type == MessageTypes.ExecuteExtensionCommand)
                     {
                         string commandId = BinaryMessageSerializer.ParseExecuteExtensionCommand(payload);
-                        Console.WriteLine($"[PrettierPlugin] Received command: {commandId}");
+                        SpanCoderDiagnostics.LogInformation($"[PrettierPlugin] Received command: {commandId}");
                     }
                     else if (header.Type == MessageTypes.ExtensionSettingChanged)
                     {
                         BinaryMessageSerializer.ParseExtensionSettingChanged(payload, out string settingId, out string value);
-                        Console.WriteLine($"[PrettierPlugin] Setting changed: {settingId} = {value}");
+                        SpanCoderDiagnostics.LogInformation($"[PrettierPlugin] Setting changed: {settingId} = {value}");
                     }
                     else if (header.Type == MessageTypes.FormatDocumentRequest)
                     {
                         BinaryMessageSerializer.ParseFormatDocumentRequest(payload, out int docId, out string filePath, out string content);
-                        Console.WriteLine($"[PrettierPlugin] Format request for: {filePath} (doc {docId})");
+                        SpanCoderDiagnostics.LogInformation($"[PrettierPlugin] Format request for: {filePath} (doc {docId})");
 
                         _ = Task.Run(async () =>
                         {
@@ -105,7 +107,7 @@ namespace SpanCoder.Extensions.Prettier
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"[PrettierPlugin] Error processing format request: {ex.Message}");
+                                SpanCoderDiagnostics.LogError($"[PrettierPlugin] Error processing format request: {ex.Message}");
                             }
                         });
                     }
@@ -113,7 +115,7 @@ namespace SpanCoder.Extensions.Prettier
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PrettierPlugin] Error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[PrettierPlugin] Error: {ex.Message}");
             }
             finally
             {
@@ -157,14 +159,14 @@ namespace SpanCoder.Extensions.Prettier
                         }
                         else
                         {
-                            Console.WriteLine($"[PrettierPlugin] Prettier process failed (ExitCode: {proc.ExitCode}). Error: {error}");
+                            SpanCoderDiagnostics.LogWarning($"[PrettierPlugin] Prettier process failed (ExitCode: {proc.ExitCode}). Error: {error}");
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PrettierPlugin] Prettier execution failed: {ex.Message}. Falling back to mock.");
+                SpanCoderDiagnostics.LogWarning($"[PrettierPlugin] Prettier execution failed: {ex.Message}. Falling back to mock.");
             }
 
             string ext = Path.GetExtension(filePath).ToLowerInvariant();

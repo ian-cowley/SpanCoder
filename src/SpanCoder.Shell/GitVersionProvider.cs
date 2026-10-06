@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using SpanCoder.Contracts;
 
 namespace SpanCoder.Shell
 {
@@ -71,7 +72,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[GitVersionProvider] Refresh failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[GitVersionProvider] Refresh failed: {ex.Message}");
             }
             finally
             {

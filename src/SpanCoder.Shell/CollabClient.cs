@@ -42,11 +42,11 @@ namespace SpanCoder.Shell
             _cts = new CancellationTokenSource();
 
             var uri = new Uri($"ws://{ipAddress}:{port}/collab/");
-            Console.WriteLine($"[CollabClient] Connecting to {uri}...");
+            SpanCoderDiagnostics.LogInformation($"[CollabClient] Connecting to {uri}...");
             await ws.ConnectAsync(uri, _cts.Token);
             _webSocket = ws;
             _isConnected = true;
-            Console.WriteLine("[CollabClient] Connected successfully.");
+            SpanCoderDiagnostics.LogInformation("[CollabClient] Connected successfully.");
 
             // Start listening for incoming server messages
             _ = Task.Run(ReadLoop);
@@ -152,7 +152,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[CollabClient] Error sending message: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[CollabClient] Error sending message: {ex.Message}");
             }
         }
 
@@ -202,7 +202,7 @@ namespace SpanCoder.Shell
                 {
                     if (_isConnected)
                     {
-                        Console.WriteLine($"[CollabClient] Read loop exception: {ex.Message}");
+                        SpanCoderDiagnostics.LogError($"[CollabClient] Read loop exception: {ex.Message}");
                     }
                     break;
                 }

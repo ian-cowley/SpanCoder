@@ -75,7 +75,7 @@ namespace SpanCoder.Shell
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[ShellLayoutManager] Failed to parse shortcut '{cmdDesc.DefaultShortcut}' for command '{commandId}': {ex.Message}");
+                            SpanCoderDiagnostics.LogWarning($"[ShellLayoutManager] Failed to parse shortcut '{cmdDesc.DefaultShortcut}' for command '{commandId}': {ex.Message}");
                         }
                     }
                 }

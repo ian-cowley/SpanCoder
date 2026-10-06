@@ -433,7 +433,7 @@ namespace SpanCoder.App
                 _isRecovering = true;
             }
 
-            Console.WriteLine("[IpcConnection] Engine process crash detected! Starting automatic recovery...");
+            SpanCoderDiagnostics.LogWarning("[IpcConnection] Engine process crash detected! Starting automatic recovery...");
 
             try
             {
@@ -464,7 +464,7 @@ namespace SpanCoder.App
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[IpcConnection] Crash recovery failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[IpcConnection] Crash recovery failed: {ex.Message}", ex);
             }
             finally
             {
@@ -472,7 +472,7 @@ namespace SpanCoder.App
                 {
                     _isRecovering = false;
                 }
-                Console.WriteLine("[IpcConnection] Recovery completed.");
+                SpanCoderDiagnostics.LogInformation("[IpcConnection] Recovery completed.");
             }
         }
 
@@ -481,7 +481,7 @@ namespace SpanCoder.App
             // Replay the file load and all edits in order
             foreach (var state in _trackedStates.Values)
             {
-                Console.WriteLine($"[IpcConnection] Replaying load for {state.FilePath}...");
+                SpanCoderDiagnostics.LogInformation($"[IpcConnection] Replaying load for {state.FilePath}...");
                 
                 // Construct and send LoadFile message
                 string remotePath = _pathMapper.ToRemote(state.FilePath);
@@ -517,7 +517,7 @@ namespace SpanCoder.App
                 UpdateLocalMirror(newDocId, offset, addedLength, deletedLength, text);
 
                 // Replay the edits
-                Console.WriteLine($"[IpcConnection] Replaying {state.EditHistory.Count} edits for {state.FilePath}...");
+                SpanCoderDiagnostics.LogInformation($"[IpcConnection] Replaying {state.EditHistory.Count} edits for {state.FilePath}...");
                 lock (state.EditHistory)
                 {
                     foreach (var editPacket in state.EditHistory)

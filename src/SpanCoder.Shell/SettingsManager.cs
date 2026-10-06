@@ -210,7 +210,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[SettingsManager] Failed to load settings: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[SettingsManager] Failed to load settings: {ex.Message}");
             }
         }
 
@@ -242,7 +242,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[SettingsManager] Failed to save settings: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[SettingsManager] Failed to save settings: {ex.Message}");
             }
         }
     }

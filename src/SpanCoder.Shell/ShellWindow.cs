@@ -183,7 +183,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ShellWindow] Failed to create dynamic icon: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[ShellWindow] Failed to create dynamic icon: {ex.Message}");
             }
 
             // Intercept Alt key down/up to defend TextEditorCanvas focus from menu mnemonics activation
@@ -2681,7 +2681,7 @@ namespace SpanCoder.Shell
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ShellWindow] Failed to parse custom/default shortcut '{shortcut}' for command '{cmd.Id}': {ex.Message}");
+                        SpanCoderDiagnostics.LogWarning($"[ShellWindow] Failed to parse custom/default shortcut '{shortcut}' for command '{cmd.Id}': {ex.Message}");
                     }
                 }
             }
@@ -2708,7 +2708,7 @@ namespace SpanCoder.Shell
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ShellWindow] Failed to parse custom/default shortcut '{shortcut}' for command '{cmd.Id}': {ex.Message}");
+                        SpanCoderDiagnostics.LogWarning($"[ShellWindow] Failed to parse custom/default shortcut '{shortcut}' for command '{cmd.Id}': {ex.Message}");
                     }
                 }
             }
@@ -3169,7 +3169,7 @@ namespace SpanCoder.Shell
             if (pane == null) return;
             
             pane.TabsContainer.Children.Clear();
-            Console.WriteLine($"[RebuildTabsUI] pane.OpenDocuments.Count={pane.OpenDocuments.Count}");
+            SpanCoderDiagnostics.LogInformation($"[RebuildTabsUI] pane.OpenDocuments.Count={pane.OpenDocuments.Count}");
             foreach (var doc in pane.OpenDocuments)
             {
                 var tabBorder = new Border
@@ -4106,7 +4106,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ShellWindow] ReplaceWorkspaceMatches error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[ShellWindow] ReplaceWorkspaceMatches error: {ex.Message}");
             }
         }
 
@@ -4125,7 +4125,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ShellWindow] Cut Clipboard error: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[ShellWindow] Cut Clipboard error: {ex.Message}");
                 }
 
                 byte[] buffer = new byte[BinaryMessageSerializer.HeaderSize + 4];
@@ -4148,7 +4148,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ShellWindow] Copy Clipboard error: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[ShellWindow] Copy Clipboard error: {ex.Message}");
                 }
             }
         }
@@ -4186,7 +4186,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ShellWindow] Paste Clipboard error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[ShellWindow] Paste Clipboard error: {ex.Message}");
             }
         }
 
@@ -4612,11 +4612,11 @@ namespace SpanCoder.Shell
                             };
                             System.Diagnostics.Process.Start(startInfo);
                             started = true;
-                            Console.WriteLine($"[ShellWindow] Launched local Ollama service: {localExe}");
+                            SpanCoderDiagnostics.LogInformation($"[ShellWindow] Launched local Ollama service: {localExe}");
                         }
                         catch (Exception startEx)
                         {
-                            Console.WriteLine($"[ShellWindow] Failed to start local Ollama: {startEx.Message}");
+                            SpanCoderDiagnostics.LogWarning($"[ShellWindow] Failed to start local Ollama: {startEx.Message}");
                         }
                     }
                     else if (OperatingSystem.IsWindows() && CheckWslOllama())
@@ -4632,16 +4632,16 @@ namespace SpanCoder.Shell
                             };
                             System.Diagnostics.Process.Start(startInfo);
                             started = true;
-                            Console.WriteLine("[ShellWindow] Detected Ollama in WSL. Launched 'wsl ollama serve'.");
+                            SpanCoderDiagnostics.LogInformation("[ShellWindow] Detected Ollama in WSL. Launched 'wsl ollama serve'.");
                         }
                         catch (Exception wslEx)
                         {
-                            Console.WriteLine($"[ShellWindow] Failed to start WSL Ollama: {wslEx.Message}");
+                            SpanCoderDiagnostics.LogWarning($"[ShellWindow] Failed to start WSL Ollama: {wslEx.Message}");
                         }
                     }
                     else
                     {
-                        Console.WriteLine("[ShellWindow] Ollama executable not found on host or WSL. AI features will be offline.");
+                        SpanCoderDiagnostics.LogInformation("[ShellWindow] Ollama executable not found on host or WSL. AI features will be offline.");
                         UpdateStatusBarText("AI Offline: Ollama not found");
                         return;
                     }
@@ -4663,7 +4663,7 @@ namespace SpanCoder.Shell
 
                 if (response == null || !response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine("[ShellWindow] Ollama service not running.");
+                    SpanCoderDiagnostics.LogInformation("[ShellWindow] Ollama service not running.");
                     UpdateStatusBarText("AI Offline: Ollama not running");
                     return;
                 }
@@ -4693,13 +4693,13 @@ namespace SpanCoder.Shell
                 }
                 else
                 {
-                    Console.WriteLine($"[ShellWindow] Ollama api/pull returned non-success: {pullResponse.StatusCode} - {pullResponse.ReasonPhrase}");
+                    SpanCoderDiagnostics.LogWarning($"[ShellWindow] Ollama api/pull returned non-success: {pullResponse.StatusCode} - {pullResponse.ReasonPhrase}");
                     UpdateStatusBarText("AI: Download failed. Run 'ollama pull qwen2.5-coder:1.5b' manually.");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ShellWindow] Ollama check failed: {ex.Message}");
+                SpanCoderDiagnostics.LogWarning($"[ShellWindow] Ollama check failed: {ex.Message}");
                 LogHelper.Log($"[ShellWindow] Ollama check failed: {ex.Message}");
                 UpdateStatusBarText("AI Offline: Ollama not running");
             }
@@ -4902,7 +4902,7 @@ namespace SpanCoder.Shell
                                 }
                                 else if (cmdId == "python.run")
                                 {
-                                    Console.WriteLine($"[MockExtension python-lang] Executed python.run!");
+                                    SpanCoderDiagnostics.LogInformation("[MockExtension python-lang] Executed python.run!");
                                     Dispatcher.UIThread.Post(() => {
                                         _statusBar.Text = "Python script started... (simulated)";
                                     });
@@ -4913,7 +4913,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[MockExtension {extId}] Error: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[MockExtension {extId}] Error: {ex.Message}");
                 }
                 finally
                 {
@@ -4948,7 +4948,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ShellWindow] Failed to send mock panel update: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[ShellWindow] Failed to send mock panel update: {ex.Message}");
                 }
             }
         }
@@ -5045,7 +5045,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ShellWindow] Failed to load/refresh diff for {relativePath}: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[ShellWindow] Failed to load/refresh diff for {relativePath}: {ex.Message}");
                 }
             });
         }
@@ -5349,7 +5349,7 @@ namespace SpanCoder.Shell
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[Shell] Error saving {doc.FilePath} on window close: {ex.Message}");
+                            SpanCoderDiagnostics.LogError($"[Shell] Error saving {doc.FilePath} on window close: {ex.Message}");
                         }
                     }
                     _bypassClosingCheck = true;
@@ -5367,7 +5367,7 @@ namespace SpanCoder.Shell
 
             base.OnClosing(e);
 
-            Console.WriteLine("[Shell] Window closing. Cleaning up background processes...");
+            SpanCoderDiagnostics.LogInformation("[Shell] Window closing. Cleaning up background processes...");
 
             // 1. Dispose Terminal/PTY
             try
@@ -5376,7 +5376,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Shell] Error disposing PTY: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[Shell] Error disposing PTY: {ex.Message}");
             }
 
             // 2. Stop all mock extensions
@@ -5388,7 +5388,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Shell] Error stopping mock extension {extId}: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[Shell] Error stopping mock extension {extId}: {ex.Message}");
                 }
             }
 
@@ -5401,7 +5401,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Shell] Error disposing engine connection: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[Shell] Error disposing engine connection: {ex.Message}");
                 }
             }
 
@@ -5429,12 +5429,12 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Shell] Error listing processes: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[Shell] Error listing processes: {ex.Message}");
             }
 
             if (processesToClean.Count > 0)
             {
-                Console.WriteLine($"[Shell] Found {processesToClean.Count} lingering processes. Waiting for exit...");
+                SpanCoderDiagnostics.LogInformation($"[Shell] Found {processesToClean.Count} lingering processes. Waiting for exit...");
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 
                 while (stopwatch.ElapsedMilliseconds < 1500 && processesToClean.Any(p => !p.HasExited))
@@ -5445,7 +5445,7 @@ namespace SpanCoder.Shell
                 var lingering = processesToClean.Where(p => !p.HasExited).ToList();
                 if (lingering.Count > 0)
                 {
-                    Console.WriteLine($"[Shell] {lingering.Count} processes did not exit. Attempting to kill...");
+                    SpanCoderDiagnostics.LogWarning($"[Shell] {lingering.Count} processes did not exit. Attempting to kill...");
                     foreach (var p in lingering)
                     {
                         try
@@ -5454,7 +5454,7 @@ namespace SpanCoder.Shell
                         }
                         catch (Exception killEx)
                         {
-                            Console.WriteLine($"[Shell] Failed to kill PID {p.Id}: {killEx.Message}");
+                            SpanCoderDiagnostics.LogError($"[Shell] Failed to kill PID {p.Id}: {killEx.Message}");
                         }
                     }
 
@@ -5706,7 +5706,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[LiveUnitTesting] Error during background test: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[LiveUnitTesting] Error during background test: {ex.Message}");
                     Dispatcher.UIThread.Post(() =>
                     {
                         _statusBar.Text = "Live Unit Testing failed.";
@@ -5742,7 +5742,7 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[LiveUnitTesting] Failed to parse Cobertura XML: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[LiveUnitTesting] Failed to parse Cobertura XML: {ex.Message}");
             }
         }
 
@@ -5871,7 +5871,7 @@ namespace SpanCoder.Shell
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ShellWindow] Error reading deployCmd: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[ShellWindow] Error reading deployCmd: {ex.Message}");
                 }
             }
 

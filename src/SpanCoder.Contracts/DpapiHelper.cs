@@ -78,7 +78,7 @@ namespace SpanCoder.Contracts
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[DpapiHelper] Windows encryption failed: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[DpapiHelper] Windows encryption failed: {ex.Message}", ex);
                 }
             }
 
@@ -166,7 +166,7 @@ namespace SpanCoder.Contracts
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DpapiHelper] Fallback encryption failed: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[DpapiHelper] Fallback encryption failed: {ex.Message}", ex);
                 return "";
             }
         }

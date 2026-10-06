@@ -38,7 +38,7 @@ namespace SpanCoder.Shell
             _isRunning = true;
             _listener.Start();
             Task.Run(AcceptLoop);
-            Console.WriteLine($"[CollabServer] Started listening on port {_port}...");
+            SpanCoderDiagnostics.LogInformation($"[CollabServer] Started listening on port {_port}...");
         }
 
         public void Stop()
@@ -55,7 +55,7 @@ namespace SpanCoder.Shell
                 catch { }
             }
             _clients.Clear();
-            Console.WriteLine("[CollabServer] Stopped.");
+            SpanCoderDiagnostics.LogInformation("[CollabServer] Stopped.");
         }
 
         private async Task AcceptLoop()
@@ -114,7 +114,7 @@ namespace SpanCoder.Shell
                 using WebSocket webSocket = WebSocket.CreateFromStream(stream, isServer: true, subProtocol: null, keepAliveInterval: TimeSpan.FromSeconds(30));
                 _clients[clientId] = webSocket;
 
-                Console.WriteLine($"[CollabServer] Client '{clientId}' connected.");
+                SpanCoderDiagnostics.LogInformation($"[CollabServer] Client '{clientId}' connected.");
 
                 // 3. Send Sync State to new client
                 var syncState = new CollabSyncState
@@ -152,13 +152,13 @@ namespace SpanCoder.Shell
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[CollabServer] Exception handling client '{clientId}': {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[CollabServer] Exception handling client '{clientId}': {ex.Message}");
             }
             finally
             {
                 _clients.TryRemove(clientId, out _);
                 client.Close();
-                Console.WriteLine($"[CollabServer] Client '{clientId}' disconnected.");
+                SpanCoderDiagnostics.LogInformation($"[CollabServer] Client '{clientId}' disconnected.");
                 
                 // Broadcast cursor removal
                 var removeCursor = new CollabCursorMessage

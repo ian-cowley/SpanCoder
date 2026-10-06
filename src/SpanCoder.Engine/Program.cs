@@ -10,6 +10,8 @@ namespace SpanCoder.Engine
     {
         public static void Main(string[] args)
         {
+            SpanCoderDiagnostics.Logger = new ConsoleGlacierLogger(LogLevel.Information);
+
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--mock-lsp")
@@ -45,7 +47,7 @@ namespace SpanCoder.Engine
 
             if (port == 0)
             {
-                Console.WriteLine("Usage: SpanCoder.Engine --port <port> [--listen]");
+                SpanCoderDiagnostics.LogInformation("Usage: SpanCoder.Engine --port <port> [--listen]");
                 return;
             }
 
@@ -53,7 +55,7 @@ namespace SpanCoder.Engine
             {
                 var listener = new TcpListener(System.Net.IPAddress.Any, port);
                 listener.Start();
-                Console.WriteLine($"[Engine] Listening for connections on port {port}...");
+                SpanCoderDiagnostics.LogInformation($"[Engine] Listening for connections on port {port}...");
                 while (true)
                 {
                     try
@@ -63,14 +65,14 @@ namespace SpanCoder.Engine
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[Engine] Listener error: {ex.Message}");
+                        SpanCoderDiagnostics.LogError($"[Engine] Listener error: {ex.Message}");
                         Thread.Sleep(1000);
                     }
                 }
             }
             else
             {
-                Console.WriteLine($"[Engine] Connecting to host on port {port}...");
+                SpanCoderDiagnostics.LogInformation($"[Engine] Connecting to host on port {port}...");
                 TcpClient client;
                 try
                 {
@@ -79,7 +81,7 @@ namespace SpanCoder.Engine
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Engine] Failed to connect: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[Engine] Failed to connect: {ex.Message}");
                     return;
                 }
 
@@ -89,7 +91,7 @@ namespace SpanCoder.Engine
 
         private static void HandleClient(TcpClient client)
         {
-            Console.WriteLine("[Engine] Client connected. Starting message loop.");
+            SpanCoderDiagnostics.LogInformation("[Engine] Client connected. Starting message loop.");
             using var stream = client.GetStream();
             var engineHost = new EngineHost();
             object socketLock = new object();
@@ -107,7 +109,7 @@ namespace SpanCoder.Engine
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Engine] Error writing response: {ex.Message}");
+                    SpanCoderDiagnostics.LogError($"[Engine] Error writing response: {ex.Message}");
                 }
             };
 
@@ -147,13 +149,13 @@ namespace SpanCoder.Engine
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Engine] Connection closed or error: {ex.Message}");
+                SpanCoderDiagnostics.LogError($"[Engine] Connection closed or error: {ex.Message}");
             }
             finally
             {
                 engineHost.Stop();
                 client.Close();
-                Console.WriteLine("[Engine] Client disconnected.");
+                SpanCoderDiagnostics.LogInformation("[Engine] Client disconnected.");
             }
         }
 

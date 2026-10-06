@@ -537,11 +537,12 @@ This produces a fully compiled native binary in the publish folder, ready for di
 
 ---
 
-## 🆕 What's New in v1.0.1
+## 🆕 What's New in v1.0.2
 
-- **Pure Roslyn in-process analysis** — replaces the previous `python.exe` subprocess spawning for code analysis, eliminating all IPC overhead.
-- **Analysis latency reduced from ~800ms to <5ms** — in-process Roslyn compilation and symbol resolution runs orders of magnitude faster than spawning an external process.
-- **115 tests** passing (100 %).
+- **Ambient Pluggable Logging (`SpanCoderDiagnostics`)** — Replaced raw `Console.*` calls across core services with zero-dependency ambient pluggable logging (`ISpanCoderLogger`), ensuring clean standard I/O streams during IDE out-of-process engine IPC.
+- **`EngineHost` Modularization** — Decomposed the engine host architecture into cohesive partial classes adhering to the <800 lines ecosystem standard.
+- **Pure Roslyn in-process analysis** — Replaced external subprocess spawning for code analysis, eliminating IPC overhead with analysis latency <5ms.
+- **128 tests** passing (100%).
 
 ---
 

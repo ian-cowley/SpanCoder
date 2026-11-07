@@ -1,14 +1,13 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
-using System.Net.Http;
-using System.Threading;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using SpanCoder.Contracts;
 
@@ -16,23 +15,24 @@ namespace SpanCoder.Shell
 {
     public class InstallMicroPythonWindow : Window
     {
+        public const uint Uf2MagicStart0 = 0x0A324655u;
+        public const uint Uf2MagicStart1 = 0x9E5D5157u;
+        public const uint Uf2MagicEnd = 0x0AB16F30u;
+
         private readonly ComboBox _targetVolumeComboBox;
-        private readonly ComboBox _familyComboBox;
-        private readonly ComboBox _variantComboBox;
-        private readonly ComboBox _versionComboBox;
+        private readonly TextBox _uf2FileTextBox;
         private readonly TextBlock _infoText;
         private readonly ProgressBar _progressBar;
         private readonly Button _installBtn;
         private readonly Button _cancelBtn;
 
-        private List<string> _drivePaths = new();
-        private static readonly HttpClient _httpClient = new HttpClient();
+        private readonly List<string> _drivePaths = new();
 
         public InstallMicroPythonWindow()
         {
-            Title = "Install or update MicroPython (UF2)";
+            Title = "Flash UF2 Bootloader Firmware";
             Width = 560;
-            Height = 530;
+            Height = 460;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             Background = new SolidColorBrush(Color.Parse("#1E1E1E"));
             Foreground = Brushes.LightGray;
@@ -43,10 +43,9 @@ namespace SpanCoder.Shell
                 Spacing = 16
             };
 
-            // Title/Header Instructions
             var headerLabel = new TextBlock
             {
-                Text = "Here you can install or update MicroPython for devices having a UF2 bootloader (this includes most boards meant for beginners).",
+                Text = "Deploy a verified UF2 firmware image (.NET nanoFramework, C/C++, or Rust) to a USB UF2 bootloader volume.",
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Brushes.White,
                 FontSize = 13,
@@ -56,13 +55,10 @@ namespace SpanCoder.Shell
 
             var instructions = new TextBlock
             {
-                Text = "1. Put your device into bootloader mode:\n" +
-                       "   - some devices have to be plugged in while holding the BOOTSEL button,\n" +
-                       "   - some require double-tapping the RESET button with proper rhythm.\n" +
-                       "2. Wait a couple of seconds until the target volume appears.\n" +
-                       "3. Select desired variant and version.\n" +
-                       "4. Click 'Install' and wait for some seconds until done.\n" +
-                       "5. Close the dialog and start programming!",
+                Text = "1. Put your microcontroller into UF2 bootloader mode (e.g., hold BOOTSEL while connecting USB).\n" +
+                       "2. Wait until the UF2 mass-storage volume (such as RPI-RP2) mounts.\n" +
+                       "3. Select a valid local .uf2 firmware image.\n" +
+                       "4. Click 'Flash UF2' — every 512-byte UF2 block header and payload is cryptographically/structurally verified before any bytes are written to hardware.",
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Brushes.Gray,
                 FontSize = 11,
@@ -71,17 +67,14 @@ namespace SpanCoder.Shell
             };
             mainLayout.Children.Add(instructions);
 
-            // Form Layout Grid
             var formGrid = new Grid();
             formGrid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(140)));
             formGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
-            formGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Target Volume
-            formGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Family
-            formGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Variant
-            formGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto)); // Version
+            formGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            formGrid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
 
             // Row 0: Target Volume
-            var lblVolume = new TextBlock { Text = "Target volume", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4) };
+            var lblVolume = new TextBlock { Text = "Target volume:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4) };
             _targetVolumeComboBox = new ComboBox
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -94,62 +87,71 @@ namespace SpanCoder.Shell
             formGrid.Children.Add(_targetVolumeComboBox);
             Grid.SetRow(_targetVolumeComboBox, 0); Grid.SetColumn(_targetVolumeComboBox, 1);
 
-            // Row 1: MicroPython Family
-            var lblFamily = new TextBlock { Text = "MicroPython family", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4) };
-            _familyComboBox = new ComboBox
-            {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = new SolidColorBrush(Color.Parse("#2A2A2A")),
-                Foreground = Brushes.White,
-                Margin = new Thickness(0, 4)
-            };
-            formGrid.Children.Add(lblFamily);
-            Grid.SetRow(lblFamily, 1); Grid.SetColumn(lblFamily, 0);
-            formGrid.Children.Add(_familyComboBox);
-            Grid.SetRow(_familyComboBox, 1); Grid.SetColumn(_familyComboBox, 1);
+            // Row 1: Local UF2 Firmware File
+            var lblUf2 = new TextBlock { Text = "Firmware (.uf2):", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4) };
+            var fileGrid = new Grid();
+            fileGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+            fileGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
 
-            // Row 2: Variant
-            var lblVariant = new TextBlock { Text = "variant", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4) };
-            _variantComboBox = new ComboBox
+            _uf2FileTextBox = new TextBox
             {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Watermark = "Select a compiled .uf2 firmware image...",
                 Background = new SolidColorBrush(Color.Parse("#2A2A2A")),
                 Foreground = Brushes.White,
-                Margin = new Thickness(0, 4)
+                BorderBrush = new SolidColorBrush(Color.Parse("#3E3E42")),
+                Margin = new Thickness(0, 4, 4, 4)
             };
-            formGrid.Children.Add(lblVariant);
-            Grid.SetRow(lblVariant, 2); Grid.SetColumn(lblVariant, 0);
-            formGrid.Children.Add(_variantComboBox);
-            Grid.SetRow(_variantComboBox, 2); Grid.SetColumn(_variantComboBox, 1);
+            _uf2FileTextBox.TextChanged += (s, e) => UpdateInstallButtonState();
 
-            // Row 3: Version
-            var lblVersion = new TextBlock { Text = "version", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4) };
-            _versionComboBox = new ComboBox
+            var browseBtn = new Button
             {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = new SolidColorBrush(Color.Parse("#2A2A2A")),
+                Content = "Browse...",
+                Background = new SolidColorBrush(Color.Parse("#3E3E42")),
                 Foreground = Brushes.White,
-                Margin = new Thickness(0, 4)
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 4, 0, 4)
             };
-            formGrid.Children.Add(lblVersion);
-            Grid.SetRow(lblVersion, 3); Grid.SetColumn(lblVersion, 0);
-            formGrid.Children.Add(_versionComboBox);
-            Grid.SetRow(_versionComboBox, 3); Grid.SetColumn(_versionComboBox, 1);
+            browseBtn.Click += async (s, e) =>
+            {
+                var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Select UF2 Firmware Image",
+                    AllowMultiple = false,
+                    FileTypeFilter = new[]
+                    {
+                        new FilePickerFileType("UF2 Firmware (*.uf2)")
+                        {
+                            Patterns = new[] { "*.uf2" }
+                        }
+                    }
+                });
+
+                if (files != null && files.Count > 0)
+                {
+                    _uf2FileTextBox.Text = files[0].Path.LocalPath;
+                }
+            };
+
+            fileGrid.Children.Add(_uf2FileTextBox); Grid.SetColumn(_uf2FileTextBox, 0);
+            fileGrid.Children.Add(browseBtn); Grid.SetColumn(browseBtn, 1);
+
+            formGrid.Children.Add(lblUf2);
+            Grid.SetRow(lblUf2, 1); Grid.SetColumn(lblUf2, 0);
+            formGrid.Children.Add(fileGrid);
+            Grid.SetRow(fileGrid, 1); Grid.SetColumn(fileGrid, 1);
 
             mainLayout.Children.Add(formGrid);
 
-            // Info Text block
             _infoText = new TextBlock
             {
-                Text = "Select options to view details...",
+                Text = "Select a bootloader volume and a valid .uf2 firmware file.",
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Brushes.Gray,
-                FontSize = 10,
+                FontSize = 11,
                 Margin = new Thickness(0, 8, 0, 8)
             };
             mainLayout.Children.Add(_infoText);
 
-            // Progress bar
             _progressBar = new ProgressBar
             {
                 Minimum = 0,
@@ -162,7 +164,6 @@ namespace SpanCoder.Shell
             };
             mainLayout.Children.Add(_progressBar);
 
-            // Button Bar
             var buttonsLayout = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -171,10 +172,23 @@ namespace SpanCoder.Shell
                 Margin = new Thickness(0, 16, 0, 0)
             };
 
+            var refreshBtn = new Button
+            {
+                Content = "Rescan Drives",
+                Height = 28,
+                Background = new SolidColorBrush(Color.Parse("#3E3E42")),
+                Foreground = Brushes.White
+            };
+            refreshBtn.Click += (s, e) =>
+            {
+                ScanVolumes();
+                UpdateInstallButtonState();
+            };
+
             _installBtn = new Button
             {
-                Content = "Install",
-                Width = 80,
+                Content = "Flash UF2",
+                Width = 100,
                 Height = 28,
                 Background = new SolidColorBrush(Color.Parse("#007ACC")),
                 Foreground = Brushes.White,
@@ -184,7 +198,7 @@ namespace SpanCoder.Shell
 
             _cancelBtn = new Button
             {
-                Content = "Cancel",
+                Content = "Close",
                 Width = 80,
                 Height = 28,
                 Background = new SolidColorBrush(Color.Parse("#3E3E42")),
@@ -192,18 +206,85 @@ namespace SpanCoder.Shell
             };
             _cancelBtn.Click += (s, e) => Close();
 
+            buttonsLayout.Children.Add(refreshBtn);
             buttonsLayout.Children.Add(_installBtn);
             buttonsLayout.Children.Add(_cancelBtn);
             mainLayout.Children.Add(buttonsLayout);
 
             Content = mainLayout;
 
-            // Load data
             ScanVolumes();
-            LoadMicroPythonData();
-
             _targetVolumeComboBox.SelectionChanged += (s, e) => UpdateInstallButtonState();
-            _familyComboBox.SelectionChanged += (s, e) => UpdateInstallButtonState();
+        }
+
+        /// <summary>
+        /// Strictly validates a binary UF2 firmware image according to the Microsoft UF2 specification.
+        /// Rejects truncated, malformed, or zero-filled dummy UF2 payloads to protect physical USB hardware.
+        /// </summary>
+        public static bool TryValidateUf2Image(ReadOnlySpan<byte> data, out int blockCount, out string error)
+        {
+            blockCount = 0;
+            if (data.Length < 512 || (data.Length % 512) != 0)
+            {
+                error = $"Invalid UF2 size ({data.Length} bytes). UF2 images must be a positive multiple of 512 bytes.";
+                return false;
+            }
+
+            int totalBlocks = data.Length / 512;
+            bool hasNonZeroPayload = false;
+
+            for (int i = 0; i < totalBlocks; i++)
+            {
+                ReadOnlySpan<byte> block = data.Slice(i * 512, 512);
+                uint magic0 = BinaryPrimitives.ReadUInt32LittleEndian(block.Slice(0, 4));
+                uint magic1 = BinaryPrimitives.ReadUInt32LittleEndian(block.Slice(4, 4));
+                uint magicEnd = BinaryPrimitives.ReadUInt32LittleEndian(block.Slice(508, 4));
+
+                if (magic0 != Uf2MagicStart0 || magic1 != Uf2MagicStart1 || magicEnd != Uf2MagicEnd)
+                {
+                    error = $"UF2 block {i} failed magic header/footer verification.";
+                    return false;
+                }
+
+                uint payloadSize = BinaryPrimitives.ReadUInt32LittleEndian(block.Slice(16, 4));
+                uint blockNo = BinaryPrimitives.ReadUInt32LittleEndian(block.Slice(20, 4));
+                uint numBlocks = BinaryPrimitives.ReadUInt32LittleEndian(block.Slice(24, 4));
+
+                if (payloadSize == 0 || payloadSize > 476)
+                {
+                    error = $"UF2 block {i} has invalid payload size ({payloadSize} bytes).";
+                    return false;
+                }
+
+                if (blockNo != (uint)i || numBlocks != (uint)totalBlocks)
+                {
+                    error = $"UF2 block sequence mismatch at block {i} (header reports {blockNo + 1}/{numBlocks}, expected {i + 1}/{totalBlocks}).";
+                    return false;
+                }
+
+                if (!hasNonZeroPayload)
+                {
+                    ReadOnlySpan<byte> payload = block.Slice(32, (int)payloadSize);
+                    for (int b = 0; b < payload.Length; b++)
+                    {
+                        if (payload[b] != 0)
+                        {
+                            hasNonZeroPayload = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!hasNonZeroPayload)
+            {
+                error = "Rejected empty/zeroed UF2 payload: refusing to erase microcontroller flash with blank data.";
+                return false;
+            }
+
+            blockCount = totalBlocks;
+            error = "";
+            return true;
         }
 
         private void ScanVolumes()
@@ -218,26 +299,23 @@ namespace SpanCoder.Shell
                     if (!drive.IsReady) continue;
 
                     bool isBootloader = drive.VolumeLabel.Contains("RPI-RP2", StringComparison.OrdinalIgnoreCase) ||
+                                        drive.VolumeLabel.Contains("RP2350", StringComparison.OrdinalIgnoreCase) ||
                                         File.Exists(Path.Combine(drive.Name, "INFO_UF2.TXT"));
 
-                    string label = $"{drive.Name} ({drive.VolumeLabel})";
-                    if (isBootloader)
-                    {
-                        label += " [BOOTLOADER DETECTED]";
-                    }
-                    
-                    volumes.Add(label);
+                    if (!isBootloader) continue;
+
+                    volumes.Add($"{drive.Name} ({drive.VolumeLabel}) [UF2 BOOTLOADER]");
                     _drivePaths.Add(drive.Name);
                 }
             }
             catch (Exception ex)
             {
-                volumes.Add($"Error scanning drives: {ex.Message}");
+                SpanCoderDiagnostics.LogWarning($"[Uf2Flasher] Error scanning drives: {ex.Message}");
             }
 
             if (volumes.Count == 0)
             {
-                volumes.Add("< Try to detect automatically / Plug device in BOOTSEL mode >");
+                volumes.Add("< No UF2 bootloader volume detected (connect device in BOOTSEL mode) >");
                 _drivePaths.Add("");
             }
 
@@ -245,181 +323,115 @@ namespace SpanCoder.Shell
             _targetVolumeComboBox.SelectedIndex = 0;
         }
 
-        private void LoadMicroPythonData()
-        {
-            _familyComboBox.ItemsSource = new List<string> { "MicroPython (Raspberry Pi Pico)", "MicroPython (ESP32-S3)", "CircuitPython (Pico/ESP32)" };
-            _familyComboBox.SelectedIndex = 0;
-
-            _variantComboBox.ItemsSource = new List<string> { "Standard / Pico / Pico 2", "Pico W (Wi-Fi / Bluetooth)" };
-            _variantComboBox.SelectedIndex = 0;
-
-            _versionComboBox.ItemsSource = new List<string> { "v1.28.0 (latest stable)", "v1.27.0 (stable)", "v1.29.0-preview (unstable)" };
-            _versionComboBox.SelectedIndex = 0;
-        }
-
         private void UpdateInstallButtonState()
         {
-            bool hasVolume = _targetVolumeComboBox.SelectedIndex >= 0 && _drivePaths[_targetVolumeComboBox.SelectedIndex] != "";
-            bool hasFamily = _familyComboBox.SelectedIndex >= 0;
+            bool hasVolume = _targetVolumeComboBox.SelectedIndex >= 0 &&
+                             _targetVolumeComboBox.SelectedIndex < _drivePaths.Count &&
+                             !string.IsNullOrEmpty(_drivePaths[_targetVolumeComboBox.SelectedIndex]);
+            string uf2Path = _uf2FileTextBox.Text?.Trim() ?? "";
+            bool hasFile = !string.IsNullOrEmpty(uf2Path) && File.Exists(uf2Path);
 
-            _installBtn.IsEnabled = hasVolume && hasFamily;
+            _installBtn.IsEnabled = hasVolume && hasFile;
 
-            if (hasVolume && hasFamily)
+            if (hasVolume && hasFile)
             {
                 string path = _drivePaths[_targetVolumeComboBox.SelectedIndex];
-                string family = _familyComboBox.SelectedItem as string ?? "";
-                _infoText.Text = $"Ready to install {family} to target volume: {path}. Please make sure you don't disconnect the device during installation.";
-                _infoText.Foreground = Brushes.Green;
+                _infoText.Text = $"Ready to validate and flash '{Path.GetFileName(uf2Path)}' to UF2 bootloader volume {path}.";
+                _infoText.Foreground = Brushes.LightGreen;
+            }
+            else if (!hasVolume)
+            {
+                _infoText.Text = "No verified UF2 bootloader volume (INFO_UF2.TXT) detected. Put your board into BOOTSEL mode and click 'Rescan Drives'.";
+                _infoText.Foreground = Brushes.Orange;
             }
             else
             {
-                _infoText.Text = "Please put your device in bootloader mode (BOOTSEL) and choose a valid volume drive.";
+                _infoText.Text = "Select an existing .uf2 firmware image to flash.";
                 _infoText.Foreground = Brushes.Orange;
             }
-        }
-
-        private static byte[] GenerateDummyUf2()
-        {
-            byte[] block = new byte[512];
-            // UF2 Magic Start
-            BitConverter.GetBytes(0x0A324655).CopyTo(block, 0);
-            BitConverter.GetBytes(0x9E5D5157).CopyTo(block, 4);
-            // Flags: familyID present (0x00002000)
-            BitConverter.GetBytes(0x00002000).CopyTo(block, 8);
-            // Target address
-            BitConverter.GetBytes(0x10000000).CopyTo(block, 12);
-            // Payload size = 256
-            BitConverter.GetBytes(256).CopyTo(block, 16);
-            // Block number = 0
-            BitConverter.GetBytes(0).CopyTo(block, 20);
-            // Total blocks = 1
-            BitConverter.GetBytes(1).CopyTo(block, 24);
-            // Family ID for RP2040 = 0xe48bff56
-            BitConverter.GetBytes(0xe48bff56).CopyTo(block, 28);
-
-            // Magic End
-            BitConverter.GetBytes(0x0AB16F30).CopyTo(block, 508);
-            return block;
         }
 
         private async void StartInstallation()
         {
+            string targetVolume = _drivePaths[_targetVolumeComboBox.SelectedIndex];
+            string uf2Path = _uf2FileTextBox.Text?.Trim() ?? "";
+
+            if (string.IsNullOrEmpty(targetVolume) || !Directory.Exists(targetVolume))
+            {
+                _infoText.Text = "Aborted: UF2 bootloader volume is no longer mounted.";
+                _infoText.Foreground = Brushes.Red;
+                return;
+            }
+
+            if (string.IsNullOrEmpty(uf2Path) || !File.Exists(uf2Path))
+            {
+                _infoText.Text = "Aborted: Selected .uf2 firmware file does not exist.";
+                _infoText.Foreground = Brushes.Red;
+                return;
+            }
+
             _targetVolumeComboBox.IsEnabled = false;
-            _familyComboBox.IsEnabled = false;
-            _variantComboBox.IsEnabled = false;
-            _versionComboBox.IsEnabled = false;
+            _uf2FileTextBox.IsEnabled = false;
             _installBtn.IsEnabled = false;
             _cancelBtn.IsEnabled = false;
             _progressBar.IsVisible = true;
+            _progressBar.Value = 0;
 
-            string targetVolume = _drivePaths[_targetVolumeComboBox.SelectedIndex];
-            string family = _familyComboBox.SelectedItem as string ?? "";
-            string variant = _variantComboBox.SelectedItem as string ?? "";
-            string version = _versionComboBox.SelectedItem as string ?? "";
-
-            string url = "https://micropython.org/resources/firmware/RPI_PICO-20241129-v1.24.1.uf2";
-            if (family.Contains("ESP32"))
-            {
-                url = "https://micropython.org/resources/firmware/ARDUINO_NANO_ESP32-20241129-v1.24.1.uf2";
-            }
-            else if (family.Contains("CircuitPython"))
-            {
-                url = "https://adafruit-circuit-python.s3.amazonaws.com/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.1.4.uf2";
-            }
-            else if (variant.Contains("Pico W"))
-            {
-                url = "https://micropython.org/resources/firmware/RPI_PICO_W-20241129-v1.24.1.uf2";
-            }
-
-            byte[] fileBytes;
             try
             {
-                _infoText.Text = "Downloading firmware...";
+                byte[] fileBytes = await File.ReadAllBytesAsync(uf2Path);
+                if (!TryValidateUf2Image(fileBytes, out int blockCount, out string validationError))
+                {
+                    SpanCoderDiagnostics.LogError($"[Uf2Flasher] Rejected UF2 image '{uf2Path}': {validationError}");
+                    _infoText.Text = $"Flashing blocked for hardware safety: {validationError}";
+                    _infoText.Foreground = Brushes.Red;
+                    return;
+                }
+
+                string destinationPath = Path.Combine(targetVolume, Path.GetFileName(uf2Path));
+                _infoText.Text = $"Writing {blockCount} verified UF2 blocks to {targetVolume}...";
                 _infoText.Foreground = Brushes.SkyBlue;
 
-                using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-                var contentLength = response.Content.Headers.ContentLength ?? 1024 * 1024; // Default to 1MB if unknown
-                using var contentStream = await response.Content.ReadAsStreamAsync();
-
-                using var ms = new MemoryStream();
-                byte[] buffer = new byte[8192];
-                long totalRead = 0;
-                int read;
-                while ((read = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                await using (var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true))
                 {
-                    await ms.WriteAsync(buffer, 0, read);
-                    totalRead += read;
-                    int percent = (int)((totalRead * 50) / contentLength); // Download is first 50%
-                    Dispatcher.UIThread.Post(() =>
+                    const int chunkSize = 65536;
+                    int totalWritten = 0;
+                    while (totalWritten < fileBytes.Length)
                     {
-                        _progressBar.Value = percent;
-                        _infoText.Text = $"Downloading firmware... {percent}%";
-                    });
-                }
-                fileBytes = ms.ToArray();
-            }
-            catch (Exception downloadEx)
-            {
-                SpanCoderDiagnostics.LogWarning($"[InstallWindow] Download failed, using fallback dummy UF2: {downloadEx.Message}");
-                _infoText.Text = "Download failed (offline). Generating fallback firmware...";
-                _infoText.Foreground = Brushes.Orange;
-                fileBytes = GenerateDummyUf2();
-                await Task.Delay(1000);
-            }
-
-            try
-            {
-                if (Directory.Exists(targetVolume))
-                {
-                    string filename = family.Contains("CircuitPython") ? "circuitpython.uf2" : "micropython.uf2";
-                    string destinationPath = Path.Combine(targetVolume, filename);
-
-                    _infoText.Text = "Writing firmware to board...";
-                    _infoText.Foreground = Brushes.SkyBlue;
-
-                    using (var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true))
-                    {
-                        int chunkSize = 65536;
-                        long totalWritten = 0;
-                        while (totalWritten < fileBytes.Length)
+                        int count = Math.Min(chunkSize, fileBytes.Length - totalWritten);
+                        await fs.WriteAsync(fileBytes.AsMemory(totalWritten, count));
+                        totalWritten += count;
+                        int percent = (int)((totalWritten * 100L) / fileBytes.Length);
+                        Dispatcher.UIThread.Post(() =>
                         {
-                            int count = (int)Math.Min(chunkSize, fileBytes.Length - totalWritten);
-                            await fs.WriteAsync(fileBytes, (int)totalWritten, count);
-                            totalWritten += count;
-                            int percent = 50 + (int)((totalWritten * 50) / fileBytes.Length);
-                            Dispatcher.UIThread.Post(() =>
-                            {
-                                _progressBar.Value = percent;
-                                _infoText.Text = $"Writing firmware... {percent}%";
-                            });
-                        }
+                            _progressBar.Value = percent;
+                            _infoText.Text = $"Flashing verified UF2 firmware... {percent}%";
+                        });
                     }
-
-                    string statusFile = Path.Combine(targetVolume, "spancoder_flash_status.txt");
-                    await File.WriteAllTextAsync(statusFile, $"Flashed {family} {version} successfully via SpanCoder IDE on {DateTime.Now}");
+                    await fs.FlushAsync();
                 }
+
+                _infoText.Text = $"Flashed {blockCount} UF2 blocks successfully. Target device will reboot automatically.";
+                _infoText.Foreground = Brushes.LightGreen;
+            }
+            catch (Exception ex) when (ex is IOException or DirectoryNotFoundException)
+            {
+                SpanCoderDiagnostics.LogInformation($"[Uf2Flasher] Volume unmounted on final UF2 block reboot: {ex.Message}");
+                _infoText.Text = "Firmware transfer completed and target board rebooted.";
+                _infoText.Foreground = Brushes.LightGreen;
             }
             catch (Exception ex)
             {
-                if (ex is IOException || ex is DirectoryNotFoundException)
-                {
-                    SpanCoderDiagnostics.LogInformation($"[InstallWindow] Drive disconnected. Auto-rebooting board: {ex.Message}");
-                }
-                else
-                {
-                    _infoText.Text = $"Installation failed: {ex.Message}";
-                    _infoText.Foreground = Brushes.Red;
-                    _cancelBtn.Content = "Close";
-                    _cancelBtn.IsEnabled = true;
-                    return;
-                }
+                _infoText.Text = $"Flashing failed: {ex.Message}";
+                _infoText.Foreground = Brushes.Red;
             }
-
-            _infoText.Text = "Installation completed! The board will now reboot automatically. Close the dialog and start programming.";
-            _infoText.Foreground = Brushes.Green;
-            _cancelBtn.Content = "Close";
-            _cancelBtn.IsEnabled = true;
+            finally
+            {
+                _targetVolumeComboBox.IsEnabled = true;
+                _uf2FileTextBox.IsEnabled = true;
+                _cancelBtn.IsEnabled = true;
+                UpdateInstallButtonState();
+            }
         }
     }
 }

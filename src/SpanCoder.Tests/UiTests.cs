@@ -470,14 +470,63 @@ namespace SpanCoder.Tests
             var frame = window.CaptureRenderedFrame();
             if (frame != null)
             {
-                string targetDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "docs", "images"));
-                System.IO.Directory.CreateDirectory(targetDir);
-                string outPath = System.IO.Path.Combine(targetDir, "spancoder_ide_interface.png");
-                frame.Save(outPath);
-                Console.WriteLine("Saved screenshot to: " + outPath);
+                bool updateRepoScreenshot = Environment.GetEnvironmentVariable("SPANCODER_UPDATE_SCREENSHOTS") == "1";
+                string outPath;
+                if (updateRepoScreenshot)
+                {
+                    string targetDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "docs", "images"));
+                    System.IO.Directory.CreateDirectory(targetDir);
+                    outPath = System.IO.Path.Combine(targetDir, "spancoder_ide_interface.png");
+                }
+                else
+                {
+                    outPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"spancoder_ide_{Guid.NewGuid():N}.png");
+                }
+
+                try
+                {
+                    frame.Save(outPath);
+                    Assert.True(System.IO.File.Exists(outPath));
+                }
+                finally
+                {
+                    if (!updateRepoScreenshot && System.IO.File.Exists(outPath))
+                    {
+                        System.IO.File.Delete(outPath);
+                    }
+                }
             }
 
             window.Close();
+        }
+
+        [Fact]
+        public void TestUf2ValidatorAcceptsValidFirmwareAndRejectsZeroedOrMalformedPayloads()
+        {
+            byte[] validBlock = new byte[512];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(validBlock.AsSpan(0, 4), InstallMicroPythonWindow.Uf2MagicStart0);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(validBlock.AsSpan(4, 4), InstallMicroPythonWindow.Uf2MagicStart1);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(validBlock.AsSpan(16, 4), 256u); // payload size
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(validBlock.AsSpan(20, 4), 0u);   // blockNo
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(validBlock.AsSpan(24, 4), 1u);   // numBlocks
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(validBlock.AsSpan(508, 4), InstallMicroPythonWindow.Uf2MagicEnd);
+            validBlock[32] = 0xDE;
+            validBlock[33] = 0xAD;
+            validBlock[34] = 0xBE;
+            validBlock[35] = 0xEF;
+
+            Assert.True(InstallMicroPythonWindow.TryValidateUf2Image(validBlock, out int blocks, out string err));
+            Assert.Equal(1, blocks);
+            Assert.Equal("", err);
+
+            // Zeroed payload must be rejected to protect microcontroller flash
+            Array.Clear(validBlock, 32, 256);
+            Assert.False(InstallMicroPythonWindow.TryValidateUf2Image(validBlock, out _, out string zeroErr));
+            Assert.Contains("blank data", zeroErr, StringComparison.OrdinalIgnoreCase);
+
+            // Non-512-byte buffer must be rejected
+            Assert.False(InstallMicroPythonWindow.TryValidateUf2Image(new byte[300], out _, out string sizeErr));
+            Assert.Contains("512", sizeErr, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

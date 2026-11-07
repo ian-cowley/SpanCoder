@@ -12,7 +12,7 @@ namespace SpanCoder.Engine
         private static readonly object _writeLock = new object();
         private static int _seq = 1;
         private static int _currentLine = 20;
-        private static string _currentFilePath = "C:/Users/spuri/source/repos/PolarsPlus/Glacier.SpanCoder/src/SpanCoder.App/main.c";
+        private static string _currentFilePath = "main.c";
 
         public static void Run(Stream? customStdin = null, Stream? customStdout = null)
         {

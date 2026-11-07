@@ -11,7 +11,7 @@ namespace SpanCoder.Tests
         {
             var mapper = new RemotePathMapper(null);
             
-            string localPath = @"C:\Users\spuri\src\file.cs";
+            string localPath = @"C:\workspace\src\file.cs";
             string remotePath = "/remote/src/file.cs";
             
             Assert.Equal(localPath, mapper.ToRemote(localPath));

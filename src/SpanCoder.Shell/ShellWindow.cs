@@ -923,45 +923,6 @@ namespace SpanCoder.Shell
                         }
                       ]
                     }"
-                },
-                new MarketplaceExtension
-                {
-                    Id = "python-lang",
-                    Name = "Python Support",
-                    Description = "Syntax highlight and tools for Python.",
-                    ManifestJson = @"{
-                      ""id"": ""python-lang"",
-                      ""commands"": [
-                        {
-                          ""id"": ""python.run"",
-                          ""displayName"": ""Run Python Script"",
-                          ""category"": ""Tools"",
-                          ""defaultShortcut"": ""Ctrl+F5""
-                        }
-                      ],
-                      ""menuItems"": [
-                        {
-                          ""commandId"": ""python.run"",
-                          ""menuPath"": ""Tools/Run Python Script"",
-                          ""orderPriority"": 60
-                        }
-                      ],
-                      ""toolbarItems"": [
-                        {
-                          ""commandId"": ""python.run"",
-                          ""displayName"": ""Run Python"",
-                          ""orderPriority"": 210
-                        }
-                      ],
-                      ""languages"": [
-                        {
-                          ""extension"": "".py"",
-                          ""lineComment"": ""#"",
-                          ""keywords"": [""def"", ""class"", ""import"", ""from"", ""if"", ""elif"", ""else"", ""while"", ""for"", ""in"", ""return"", ""print""],
-                          ""types"": [""int"", ""str"", ""list"", ""dict"", ""object""]
-                        }
-                      ]
-                    }"
                 }
             };
             // Dynamically set IsInstalled on startup based on folder presence
@@ -1490,16 +1451,13 @@ namespace SpanCoder.Shell
 
             this.LayoutUpdated += (s, e) => UpdateScrollbars();
 
-            // Default workspace root path
-            string defaultWorkspace = @"c:\Users\spuri\source\repos\PolarsPlus\Glacier.SpanCoder";
-            string defaultSolution = System.IO.Path.Combine(defaultWorkspace, "SpanCoder.slnx");
-            if (System.IO.File.Exists(defaultSolution))
+            // Default workspace root path (resolved from SPANCODER_DEFAULT_WORKSPACE or current directory)
+            string defaultWorkspace = Environment.GetEnvironmentVariable("SPANCODER_DEFAULT_WORKSPACE") ?? Environment.CurrentDirectory;
+            if (System.IO.Directory.Exists(defaultWorkspace))
             {
-                _fileTree.SetRootPath(defaultSolution);
-            }
-            else if (System.IO.Directory.Exists(defaultWorkspace))
-            {
-                _fileTree.SetRootPath(defaultWorkspace);
+                string? solutionFile = System.IO.Directory.EnumerateFiles(defaultWorkspace, "*.slnx").FirstOrDefault()
+                    ?? System.IO.Directory.EnumerateFiles(defaultWorkspace, "*.sln").FirstOrDefault();
+                _fileTree.SetRootPath(solutionFile ?? defaultWorkspace);
             }
 
             // Register key bindings for all core commands
@@ -2383,7 +2341,7 @@ namespace SpanCoder.Shell
 
             if (_commandToExtensionMap.TryGetValue(commandId, out var extId) && _extensionManager != null)
             {
-                if (extId == "html-preview" || extId == "python-lang" || extId == "languages-extension")
+                if (extId == "html-preview" || extId == "languages-extension")
                 {
                     string activeFilePath = _activeDocument?.FilePath ?? "";
                     string activeContent = "";
@@ -4215,7 +4173,7 @@ namespace SpanCoder.Shell
             { "html-preview.show", ("M20,4 H4 C2.9,4 2,4.9 2,6 V18 C2,19.1 2.9,20 4,20 H20 C21.1,20 22,19.1 22,18 V6 C22,4.9 21.1,4 20,4 Z M20,18 H4 V6 H20 V18 Z M6,8 H10 V12 H6 V8 Z", "#D8A0DF") },
             { "languages.runPython", ("M8,5 V19 L19,12 Z", "#4EC9B0") },
             { "languages.cargoBuild", ("M20,6 L12,2 L4,6 L12,10 L20,6 Z M4,8 V18 L12,22 L12,12 L4,8 Z M20,8 L12,12 V22 L20,18 V8 Z", "#F05032") },
-            { "python.run", ("M8,5 V19 L19,12 Z", "#306998") },
+
             { "prettier.format", ("M3,5 H21 V7 H3 Z M3,11 H21 V13 H3 Z M3,17 H15 V19 H3 Z", "#519ABA") }
         };
 
@@ -4900,13 +4858,6 @@ namespace SpanCoder.Shell
                                     await stream.WriteAsync(contentBuf.AsMemory(0, written), cts.Token);
                                     await stream.FlushAsync(cts.Token);
                                 }
-                                else if (cmdId == "python.run")
-                                {
-                                    SpanCoderDiagnostics.LogInformation("[MockExtension python-lang] Executed python.run!");
-                                    Dispatcher.UIThread.Post(() => {
-                                        _statusBar.Text = "Python script started... (simulated)";
-                                    });
-                                }
                             }
                         }
                     }
@@ -5188,10 +5139,6 @@ namespace SpanCoder.Shell
                              "Usage:\n" +
                              "• Click 'Show HTML Preview' from the toolbar, context menu, or command palette.\n" +
                              "• The preview tab will open in the main tab area and update live as you edit your HTML code.";
-            }
-            else if (item.Id == "python-lang")
-            {
-                readmeText = "Provides basic syntax highlighting and execution tools for Python script files.";
             }
             else
             {
@@ -5570,6 +5517,7 @@ namespace SpanCoder.Shell
 
             var hints = new List<InlayHintItem>();
             var codeLens = new Dictionary<int, string>();
+            string fullText = GetDocumentText(doc);
 
             int lineCount = doc.GetLineCount();
             for (int i = 0; i < lineCount; i++)
@@ -5609,8 +5557,13 @@ namespace SpanCoder.Shell
 
                 if (isDecl)
                 {
-                    int refCount = (i % 3) + 1;
-                    codeLens[i + 1] = $"{refCount} references | spuri, {i + 1} hours ago";
+                    string? symbol = TryExtractDeclaredIdentifier(trimmed);
+                    if (!string.IsNullOrEmpty(symbol))
+                    {
+                        int totalMatches = CountWholeWordOccurrences(fullText, symbol);
+                        int refCount = Math.Max(0, totalMatches - 1);
+                        codeLens[i + 1] = $"{refCount} {(refCount == 1 ? "reference" : "references")}";
+                    }
                 }
 
                 // Inlay Hints for method arguments
@@ -5633,6 +5586,81 @@ namespace SpanCoder.Shell
 
             _canvas.SetInlayHints(hints);
             _canvas.SetCodeLens(codeLens);
+        }
+
+        private static string? TryExtractDeclaredIdentifier(string trimmedDeclaration)
+        {
+            int parenIdx = trimmedDeclaration.IndexOf('(');
+            if (parenIdx > 0)
+            {
+                string beforeParen = trimmedDeclaration.Substring(0, parenIdx).TrimEnd();
+                int genericIdx = beforeParen.IndexOf('<');
+                if (genericIdx > 0)
+                {
+                    beforeParen = beforeParen.Substring(0, genericIdx).TrimEnd();
+                }
+                int lastSpace = beforeParen.LastIndexOf(' ');
+                string candidate = lastSpace >= 0 ? beforeParen.Substring(lastSpace + 1) : beforeParen;
+                return IsValidIdentifier(candidate) ? candidate : null;
+            }
+
+            string[] typeKeywords = { "class ", "struct ", "interface ", "enum " };
+            foreach (string kw in typeKeywords)
+            {
+                int idx = trimmedDeclaration.IndexOf(kw, StringComparison.Ordinal);
+                if (idx >= 0)
+                {
+                    string rest = trimmedDeclaration.Substring(idx + kw.Length).TrimStart();
+                    int len = 0;
+                    while (len < rest.Length && (char.IsLetterOrDigit(rest[len]) || rest[len] == '_'))
+                    {
+                        len++;
+                    }
+                    if (len > 0)
+                    {
+                        return rest.Substring(0, len);
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static bool IsValidIdentifier(string s)
+        {
+            if (string.IsNullOrEmpty(s) || !(char.IsLetter(s[0]) || s[0] == '_'))
+            {
+                return false;
+            }
+            for (int i = 1; i < s.Length; i++)
+            {
+                if (!(char.IsLetterOrDigit(s[i]) || s[i] == '_'))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static int CountWholeWordOccurrences(string text, string identifier)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(identifier))
+            {
+                return 0;
+            }
+            int count = 0;
+            int idx = 0;
+            while ((idx = text.IndexOf(identifier, idx, StringComparison.Ordinal)) >= 0)
+            {
+                bool leftBoundary = idx == 0 || !(char.IsLetterOrDigit(text[idx - 1]) || text[idx - 1] == '_');
+                int end = idx + identifier.Length;
+                bool rightBoundary = end >= text.Length || !(char.IsLetterOrDigit(text[end]) || text[end] == '_');
+                if (leftBoundary && rightBoundary)
+                {
+                    count++;
+                }
+                idx = end;
+            }
+            return count;
         }
 
         private bool _isRunningTests = false;

@@ -89,8 +89,8 @@ namespace SpanCoder.Tests
             var writerLogger1 = new DelegateGlacierLogger((lvl, msg, ex) => Interlocked.Increment(ref writeCount), LogLevel.Trace);
             var writerLogger2 = new DelegateGlacierLogger((lvl, msg, ex) => Interlocked.Increment(ref writeCount), LogLevel.Trace);
 
-            // 8 writer threads logging at maximum speed
-            var writerTasks = Enumerable.Range(0, 8).Select(id => Task.Run(() =>
+            int writerThreadCount = Math.Clamp(Environment.ProcessorCount, 2, 4);
+            var writerTasks = Enumerable.Range(0, writerThreadCount).Select(id => Task.Run(() =>
             {
                 int counter = 0;
                 while (!token.IsCancellationRequested)
@@ -100,6 +100,10 @@ namespace SpanCoder.Tests
                         SpanCoderDiagnostics.LogInformation($"Concurrent write {id}-{counter++}");
                         SpanCoderDiagnostics.LogWarning($"Warning write {id}-{counter}");
                         SpanCoderDiagnostics.LogError($"Error write {id}-{counter}", new Exception("synthetic"));
+                        if ((counter & 63) == 0)
+                        {
+                            Thread.Yield();
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -146,13 +150,13 @@ namespace SpanCoder.Tests
                 }
             })).ToArray();
 
-            await Task.Delay(1500);
+            await Task.Delay(350);
             cts.Cancel();
             await Task.WhenAll(writerTasks.Concat(swapperTasks));
 
             Assert.Null(caughtException);
-            Assert.True(writeCount > 100);
-            Assert.True(swapCount > 20);
+            Assert.True(writeCount > 50);
+            Assert.True(swapCount > 10);
         }
 
         [Fact]

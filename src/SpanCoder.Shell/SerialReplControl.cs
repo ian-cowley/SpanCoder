@@ -115,7 +115,7 @@ namespace SpanCoder.Shell
 
             _flashBtn = new Button
             {
-                Content = "Install MicroPython",
+                Content = "Flash UF2 Firmware",
                 Background = new SolidColorBrush(Color.Parse("#3E3E42")),
                 Foreground = Brushes.White,
                 FontSize = 12,

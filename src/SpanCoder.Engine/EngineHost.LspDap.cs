@@ -27,7 +27,7 @@ namespace SpanCoder.Engine
                 }
             }
             catch { }
-            return Path.GetDirectoryName(filePath) ?? @"c:\Users\spuri\source\repos\PolarsPlus";
+            return Path.GetDirectoryName(filePath) ?? Environment.CurrentDirectory;
         }
 
         private LspClient GetOrCreateLspClient(string filePath)
@@ -539,6 +539,11 @@ namespace SpanCoder.Engine
                         string executable = "";
                         string arguments = "";
 
+                        bool allowMockDebugger = string.Equals(
+                            Environment.GetEnvironmentVariable("SPANCODER_ENABLE_MOCK_DEBUGGER"),
+                            "1",
+                            StringComparison.OrdinalIgnoreCase);
+
                         if (debugType.Equals("silicon", StringComparison.OrdinalIgnoreCase))
                         {
                             string targetProgram = string.IsNullOrEmpty(customProgram) ? programPath : customProgram;
@@ -546,8 +551,9 @@ namespace SpanCoder.Engine
                             {
                                 executable = gdbPath;
                                 arguments = "--interpreter=dap";
+                                _dapClient.Start(executable, arguments, targetProgram);
                             }
-                            else
+                            else if (allowMockDebugger)
                             {
                                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
                                 executable = Path.Combine(baseDir, "SpanCoder.Engine.exe");
@@ -562,8 +568,18 @@ namespace SpanCoder.Engine
                                     string dllPath = Path.Combine(baseDir, "SpanCoder.Engine.dll");
                                     arguments = $"\"{dllPath}\" --mock-silicon-dap";
                                 }
+                                _dapClient.Start(executable, arguments, targetProgram);
                             }
-                            _dapClient.Start(executable, arguments, targetProgram);
+                            else
+                            {
+                                string reason = $"Silicon debugger '{gdbPath}' was not found on PATH.";
+                                SpanCoderDiagnostics.LogError($"[EngineHost] {reason}");
+                                _dapClient.Dispose();
+                                _dapClient = null;
+                                byte[] errBuf = new byte[BinaryMessageSerializer.HeaderSize + 12 + reason.Length * 2];
+                                int errLen = BinaryMessageSerializer.WriteDebugStoppedEvent(errBuf, docId, 0, 0, reason);
+                                MessageReceived?.Invoke(errBuf[..errLen]);
+                            }
                         }
                         else
                         {
@@ -571,8 +587,9 @@ namespace SpanCoder.Engine
                             {
                                 executable = "netcoredbg";
                                 arguments = "--interpreter=dap";
+                                _dapClient.Start(executable, arguments, programPath);
                             }
-                            else
+                            else if (allowMockDebugger)
                             {
                                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
                                 executable = Path.Combine(baseDir, "SpanCoder.Engine.exe");
@@ -587,8 +604,18 @@ namespace SpanCoder.Engine
                                     string dllPath = Path.Combine(baseDir, "SpanCoder.Engine.dll");
                                     arguments = $"\"{dllPath}\" --mock-dap";
                                 }
+                                _dapClient.Start(executable, arguments, programPath);
                             }
-                            _dapClient.Start(executable, arguments, programPath);
+                            else
+                            {
+                                const string reason = "CoreCLR debugger 'netcoredbg' was not found on PATH.";
+                                SpanCoderDiagnostics.LogError($"[EngineHost] {reason}");
+                                _dapClient.Dispose();
+                                _dapClient = null;
+                                byte[] errBuf = new byte[BinaryMessageSerializer.HeaderSize + 12 + reason.Length * 2];
+                                int errLen = BinaryMessageSerializer.WriteDebugStoppedEvent(errBuf, docId, 0, 0, reason);
+                                MessageReceived?.Invoke(errBuf[..errLen]);
+                            }
                         }
                         break;
                     }

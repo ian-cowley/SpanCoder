@@ -153,65 +153,10 @@ namespace SpanCoder.Extensions.Languages
             }
         }
 
-        private static async Task<(bool Success, string Output)> RunPythonScriptAsync(string filePath, string content)
+        private static Task<(bool Success, string Output)> RunPythonScriptAsync(string filePath, string content)
         {
-            string[] executables = { "python", "python3", "py" };
-            Exception? lastException = null;
-
-            foreach (var exe in executables)
-            {
-                try
-                {
-                    bool useStdin = string.IsNullOrEmpty(filePath) || !File.Exists(filePath);
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = exe,
-                        Arguments = useStdin ? "-" : $"\"{filePath}\"",
-                        RedirectStandardInput = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-
-                    using (var proc = System.Diagnostics.Process.Start(psi))
-                    {
-                        if (proc != null)
-                        {
-                            if (useStdin)
-                            {
-                                using (var writer = proc.StandardInput)
-                                {
-                                    await writer.WriteAsync(content);
-                                }
-                            }
-                            else
-                            {
-                                proc.StandardInput.Close();
-                            }
-
-                            string stdout = await proc.StandardOutput.ReadToEndAsync();
-                            string stderr = await proc.StandardError.ReadToEndAsync();
-
-                            await proc.WaitForExitAsync();
-
-                            string combined = string.IsNullOrEmpty(stderr) ? stdout : $"{stdout}\nError:\n{stderr}";
-                            if (string.IsNullOrEmpty(combined))
-                            {
-                                combined = "(No output)";
-                            }
-
-                            return (proc.ExitCode == 0, combined);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    lastException = ex;
-                }
-            }
-
-            return (false, $"Python executable not found on system PATH. Error: {lastException?.Message}");
+            // Pure C# .NET 10 runtime policy: external Python subprocess execution is prohibited.
+            return Task.FromResult((false, "External Python subprocess execution is disabled under the pure C# .NET 10 runtime policy."));
         }
 
         private static string FindCargoProjectDir(string filePath)

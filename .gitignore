@@ -3,6 +3,12 @@
 [Bb]in/
 [Dd]ebug/
 [Rr]elease/
+[Tt]est[Rr]esults/
+*.trx
+*.nupkg
+*.snupkg
+packages/
+publish/
 *.user
 *.suo
 *.userosscache
@@ -12,6 +18,7 @@
 
 ## Custom local NuGet feed
 nuget-local/
+nuget.config
 
 ## IDE / Editors (Rider, VS Code)
 .idea/
@@ -27,3 +34,8 @@ Desktop.ini
 *.log
 spancoder.log
 
+## Mandatory Glacier Zero Secrets Policy
+appsettings*.json
+!appsettings.template.json
+*.env*
+.env*

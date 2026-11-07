@@ -199,7 +199,7 @@ graph TD
 * **Out-of-Process Syntax Highlight**: Registers keyword syntax coloring, lines/block comment configurations, and type sets for `.c`, `.cc`, `.h`, `.hpp`, and `.java` files out-of-process via the core languages extension.
 * **LSP Integration**: Dynamically routes and spawns `clangd` LSP for C/C++ files and `jdtls` LSP for Java files, providing code actions, completions, definitions, and compiler diagnostics.
 
-### 29. Microcontroller Serial & REPL Tooling (Thonny-style)
+### 29. Microcontroller Serial & UF2 Firmware Tooling
 * **Serial REPL Connection Manager**: Built-in interactive console pane at the bottom of the editor that connects to serial ports (COM/TTY). When connected, keys typed are sent over serial and responses from the board are printed to the terminal.
 * **Auto-Detection Probing**: Scans active ports, sends a query, and matches `>>>` to automatically detect a MicroPython/CircuitPython device.
 * **Interactive UF2 Flashing Dialog**: Search for bootloader-ready storage volumes (like `RPI-RP2` drives) and flashes target microcontrollers with specific MicroPython runtimes using a progress bar.
@@ -233,7 +233,7 @@ graph TD
 * **Low-Latency Sequence CRDT**: Syncs editor buffers between developers using a low-latency Conflict-free Replicated Data Type (CRDT) protocol over WebSockets. Displays remote cursor positions, selections, and user labels in real-time.
 
 ### 38. C# CodeLens References Annotations
-* **Interactive CodeLens**: Displays inline references and author information ("X references | author, Y hours ago") directly above class, struct, interface, and method declarations, automatically aligned with the code's indentation.
+* **Interactive CodeLens**: Computes whole-word identifier reference counts across the active buffer and displays inline reference annotations directly above class, struct, interface, enum, and method declarations.
 
 ---
 
@@ -539,7 +539,14 @@ This produces a fully compiled native binary in the publish folder, ready for di
 
 ---
 
-## 🆕 What's New in v1.0.2
+## 🆕 What's New in v1.1.0
+
+- **100% Pure C# .NET 10 Architecture** — Removed legacy Python extension host and subprocess spawning across all plugins and shell surfaces.
+- **Hardware-Safe UF2 Bootloader Firmware Flasher** — Full 512-byte UF2 block magic, sequence, and non-zero payload verification before writing to verified UF2 bootloader volumes.
+- **Hardened ConPTY Lifecycle & Real Identifier CodeLens** — Deterministic pseudo-console handle/attribute cleanup (DeleteProcThreadAttributeList, ClosePseudoConsole ordering) and genuine whole-word identifier reference counting.
+- **Upgraded Glacier Ecosystem Dependencies** — Glacier.Grep 1.1.0, Glacier.Graphics 1.1.0, and Glacier.Windowing 1.1.0 with <TreatWarningsAsErrors>true</TreatWarningsAsErrors>. 
+
+### Previous Highlights (v1.0.2)
 
 - **Ambient Pluggable Logging (`SpanCoderDiagnostics`)** — Replaced raw `Console.*` calls across core services with zero-dependency ambient pluggable logging (`ISpanCoderLogger`), ensuring clean standard I/O streams during IDE out-of-process engine IPC.
 - **`EngineHost` Modularization** — Decomposed the engine host architecture into cohesive partial classes adhering to the <800 lines ecosystem standard.

@@ -18,6 +18,7 @@ namespace SpanCoder.Shell
         private Process? _process;
         private SafeFileHandle? _hInputWrite;
         private SafeFileHandle? _hOutputRead;
+        private FileStream? _conPtyInputStream;
         private IntPtr _hPC = IntPtr.Zero;
         private bool _isFallback;
         private bool _isDisposed;
@@ -31,7 +32,6 @@ namespace SpanCoder.Shell
         {
             _cts = new CancellationTokenSource();
 
-            // Try native PTY
             try
             {
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -54,7 +54,6 @@ namespace SpanCoder.Shell
                 SpanCoderDiagnostics.LogWarning($"[PtyHost] Native PTY start failed: {ex.Message}. Falling back to standard redirection.");
             }
 
-            // Fallback to standard process redirection
             return StartFallback(shellPath, args, workingDir);
         }
 
@@ -75,13 +74,22 @@ namespace SpanCoder.Shell
                     _fallbackInput?.Write(bytes, offset, count);
                     _fallbackInput?.Flush();
                 }
-                else
+                else if (_conPtyInputStream != null)
                 {
-                    if (_hInputWrite != null && !_hInputWrite.IsInvalid)
+                    _conPtyInputStream.Write(bytes, offset, count);
+                    _conPtyInputStream.Flush();
+                }
+                else if (_unixFd != -1)
+                {
+                    if (offset == 0)
                     {
-                        using var fs = new FileStream(_hInputWrite, FileAccess.Write);
-                        fs.Write(bytes, offset, count);
-                        fs.Flush();
+                        write(_unixFd, bytes, count);
+                    }
+                    else
+                    {
+                        byte[] slice = new byte[count];
+                        Buffer.BlockCopy(bytes, offset, slice, 0, count);
+                        write(_unixFd, slice, count);
                     }
                 }
             }
@@ -121,7 +129,6 @@ namespace SpanCoder.Shell
             }
             catch
             {
-                // Try cmd/bash defaults if custom shellPath fails
                 try
                 {
                     _process.StartInfo.FileName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "cmd.exe" : "/bin/sh";
@@ -136,11 +143,9 @@ namespace SpanCoder.Shell
 
             _fallbackInput = _process.StandardInput.BaseStream;
 
-            // Asynchronously read stdout and stderr
             StartReadLoop(_process.StandardOutput.BaseStream);
             StartReadLoop(_process.StandardError.BaseStream);
 
-            // Wait for exit
             Task.Run(async () =>
             {
                 try
@@ -148,7 +153,7 @@ namespace SpanCoder.Shell
                     await _process.WaitForExitAsync();
                     Exited?.Invoke();
                 }
-                catch {}
+                catch { }
             });
 
             return true;
@@ -168,7 +173,7 @@ namespace SpanCoder.Shell
                         DataReceived?.Invoke(buffer, read);
                     }
                 }
-                catch {}
+                catch { }
             });
         }
 
@@ -238,6 +243,9 @@ namespace SpanCoder.Shell
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool UpdateProcThreadAttribute(IntPtr lpAttributeList, uint dwFlags, IntPtr Attribute, IntPtr lpValue, IntPtr cbSize, IntPtr lpPreviousValue, IntPtr lpReturnSize);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool CreateProcessW(
             string lpApplicationName,
@@ -256,39 +264,51 @@ namespace SpanCoder.Shell
 
         private bool StartWindowsConPty(string shellPath, string[] args, string workingDir, int cols, int rows)
         {
-            // 1. Create pipes
             if (!CreatePipe(out var hInputRead, out _hInputWrite, IntPtr.Zero, 0)) return false;
-            if (!CreatePipe(out _hOutputRead, out var hOutputWrite, IntPtr.Zero, 0)) return false;
+            if (!CreatePipe(out _hOutputRead, out var hOutputWrite, IntPtr.Zero, 0))
+            {
+                hInputRead.Dispose();
+                _hInputWrite.Dispose();
+                _hInputWrite = null;
+                return false;
+            }
 
-            // 2. Create pseudoconsole
             COORD size = new COORD { X = (short)cols, Y = (short)rows };
             int hr = CreatePseudoConsole(size, hInputRead, hOutputWrite, 0, out _hPC);
-            
-            // Close handles we passed to the console, they are duplicated inside
-            hInputRead.Close();
-            hOutputWrite.Close();
 
-            if (hr != 0) return false;
+            // Close pipe endpoints transferred to the pseudoconsole; SafeFileHandle.Dispose ensures single-close semantics
+            hInputRead.Dispose();
+            hOutputWrite.Dispose();
 
-            // 3. Initialize Startup Info with PTY attribute
+            if (hr != 0)
+            {
+                _hInputWrite.Dispose();
+                _hInputWrite = null;
+                _hOutputRead.Dispose();
+                _hOutputRead = null;
+                return false;
+            }
+
             IntPtr lpSize = IntPtr.Zero;
             InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref lpSize);
-            
+
             IntPtr lpAttributeList = Marshal.AllocHGlobal(lpSize);
             if (!InitializeProcThreadAttributeList(lpAttributeList, 1, 0, ref lpSize))
             {
                 Marshal.FreeHGlobal(lpAttributeList);
+                CleanupConPtyHandles();
                 return false;
             }
 
-            // Pin pseudoconsole pointer
             IntPtr pPC = Marshal.AllocHGlobal(IntPtr.Size);
             Marshal.WriteIntPtr(pPC, _hPC);
 
             if (!UpdateProcThreadAttribute(lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, pPC, (IntPtr)IntPtr.Size, IntPtr.Zero, IntPtr.Zero))
             {
                 Marshal.FreeHGlobal(pPC);
+                DeleteProcThreadAttributeList(lpAttributeList);
                 Marshal.FreeHGlobal(lpAttributeList);
+                CleanupConPtyHandles();
                 return false;
             }
 
@@ -296,9 +316,10 @@ namespace SpanCoder.Shell
             siEx.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
             siEx.lpAttributeList = lpAttributeList;
 
-            string cmdLine = $"\"{shellPath}\" {string.Join(" ", args)}";
-            
-            // 4. Create Process
+            string cmdLine = args.Length > 0
+                ? $"\"{shellPath}\" {string.Join(" ", args)}"
+                : $"\"{shellPath}\"";
+
             bool success = CreateProcessW(
                 shellPath,
                 cmdLine,
@@ -311,28 +332,36 @@ namespace SpanCoder.Shell
                 ref siEx,
                 out var pi);
 
-            // Free allocated attributes list and pinned pointer
             Marshal.FreeHGlobal(pPC);
+            DeleteProcThreadAttributeList(lpAttributeList);
             Marshal.FreeHGlobal(lpAttributeList);
 
             if (!success)
             {
-                ClosePseudoConsole(_hPC);
-                _hPC = IntPtr.Zero;
+                CleanupConPtyHandles();
                 return false;
             }
 
-            // Close process/thread handles we don't need directly
-            if (pi.hProcess != IntPtr.Zero) CloseHandle(pi.hProcess);
-            if (pi.hThread != IntPtr.Zero) CloseHandle(pi.hThread);
+            // Wrap raw Win32 process/thread handles in SafeFileHandle(ownsHandle: true) and dispose immediately
+            if (pi.hProcess != IntPtr.Zero)
+            {
+                using var procHandle = new SafeFileHandle(pi.hProcess, ownsHandle: true);
+            }
+            if (pi.hThread != IntPtr.Zero)
+            {
+                using var threadHandle = new SafeFileHandle(pi.hThread, ownsHandle: true);
+            }
 
-            // Start reading PTY stdout
+            _conPtyInputStream = new FileStream(_hInputWrite, FileAccess.Write, bufferSize: 4096, isAsync: false);
+            var outputHandle = _hOutputRead;
+
             Task.Run(() =>
             {
                 byte[] buffer = new byte[4096];
                 try
                 {
-                    using var fs = new FileStream(_hOutputRead, FileAccess.Read);
+                    if (outputHandle == null || outputHandle.IsInvalid || outputHandle.IsClosed) return;
+                    using var fs = new FileStream(outputHandle, FileAccess.Read, bufferSize: 4096, isAsync: false);
                     while (!_isDisposed && _cts != null && !_cts.Token.IsCancellationRequested)
                     {
                         int read = fs.Read(buffer, 0, buffer.Length);
@@ -340,7 +369,7 @@ namespace SpanCoder.Shell
                         DataReceived?.Invoke(buffer, read);
                     }
                 }
-                catch {}
+                catch { }
                 finally
                 {
                     Exited?.Invoke();
@@ -350,17 +379,29 @@ namespace SpanCoder.Shell
             return true;
         }
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CloseHandle(IntPtr hObject);
+        private void CleanupConPtyHandles()
+        {
+            if (_hPC != IntPtr.Zero)
+            {
+                ClosePseudoConsole(_hPC);
+                _hPC = IntPtr.Zero;
+            }
+            _conPtyInputStream?.Dispose();
+            _conPtyInputStream = null;
+            _hInputWrite?.Dispose();
+            _hInputWrite = null;
+            _hOutputRead?.Dispose();
+            _hOutputRead = null;
+        }
 
         #endregion
 
         #region Unix PTY
 
-        [DllImport("libutil", SetLastError = true)] // Linux
+        [DllImport("libutil", SetLastError = true)]
         private static extern int forkpty(out int amaster, StringBuilder? name, IntPtr termp, IntPtr winp);
 
-        [DllImport("libc", EntryPoint = "forkpty", SetLastError = true)] // macOS
+        [DllImport("libc", EntryPoint = "forkpty", SetLastError = true)]
         private static extern int forkpty_mac(out int amaster, StringBuilder? name, IntPtr termp, IntPtr winp);
 
         [DllImport("libc", SetLastError = true)]
@@ -405,7 +446,6 @@ namespace SpanCoder.Shell
 
             if (pid == 0)
             {
-                // Child process
                 chdir(workingDir);
                 string?[] argv = new string?[args.Length + 2];
                 argv[0] = shellPath;
@@ -416,7 +456,6 @@ namespace SpanCoder.Shell
                 Environment.Exit(-1);
             }
 
-            // Parent process
             _unixFd = masterFd;
 
             Task.Run(() =>
@@ -431,7 +470,7 @@ namespace SpanCoder.Shell
                         DataReceived?.Invoke(buffer, bytesRead);
                     }
                 }
-                catch {}
+                catch { }
                 finally
                 {
                     Exited?.Invoke();
@@ -456,19 +495,15 @@ namespace SpanCoder.Shell
                 if (_isFallback)
                 {
                     _fallbackInput?.Dispose();
-                    _process?.Kill();
+                    if (_process != null && !_process.HasExited)
+                    {
+                        _process.Kill();
+                    }
                     _process?.Dispose();
                 }
                 else
                 {
-                    _hInputWrite?.Close();
-                    _hOutputRead?.Close();
-
-                    if (_hPC != IntPtr.Zero)
-                    {
-                        ClosePseudoConsole(_hPC);
-                        _hPC = IntPtr.Zero;
-                    }
+                    CleanupConPtyHandles();
 
                     if (_unixFd != -1)
                     {
@@ -477,7 +512,7 @@ namespace SpanCoder.Shell
                     }
                 }
             }
-            catch {}
+            catch { }
         }
     }
 }

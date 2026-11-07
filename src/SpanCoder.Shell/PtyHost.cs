@@ -41,7 +41,7 @@ namespace SpanCoder.Shell
                         return true;
                     }
                 }
-                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 {
                     if (StartUnixPty(shellPath, args, workingDir, cols, rows))
                     {
@@ -399,16 +399,22 @@ namespace SpanCoder.Shell
         #region Unix PTY
 
         [DllImport("libutil", SetLastError = true)]
-        private static extern int forkpty(out int amaster, StringBuilder? name, IntPtr termp, IntPtr winp);
-
-        [DllImport("libc", EntryPoint = "forkpty", SetLastError = true)]
-        private static extern int forkpty_mac(out int amaster, StringBuilder? name, IntPtr termp, IntPtr winp);
+        private static extern int forkpty(out int amaster, IntPtr name, IntPtr termp, IntPtr winp);
 
         [DllImport("libc", SetLastError = true)]
-        private static extern int execvp(string file, string?[] argv);
+        private static extern int execvp(IntPtr file, IntPtr[] argv);
 
         [DllImport("libc", SetLastError = true)]
-        private static extern int chdir(string path);
+        private static extern int chdir(IntPtr path);
+
+        [DllImport("libc")]
+        private static extern void _exit(int status);
+
+        [DllImport("libc", SetLastError = true)]
+        private static extern int kill(int pid, int sig);
+
+        [DllImport("libc", SetLastError = true)]
+        private static extern int waitpid(int pid, out int status, int options);
 
         [DllImport("libc", SetLastError = true)]
         private static extern int write(int fd, byte[] buf, int count);
@@ -420,42 +426,47 @@ namespace SpanCoder.Shell
         private static extern int close(int fd);
 
         private int _unixFd = -1;
+        private int _unixChildPid = -1;
 
         private bool StartUnixPty(string shellPath, string[] args, string workingDir, int cols, int rows)
         {
+            // Pre-marshal all UTF-8 buffers BEFORE forkpty() so the forked child never touches the managed heap or malloc
+            IntPtr nativeWorkDir = Marshal.StringToCoTaskMemUTF8(workingDir);
+            IntPtr nativeShell = Marshal.StringToCoTaskMemUTF8(shellPath);
+            IntPtr[] nativeArgv = new IntPtr[args.Length + 2];
+            nativeArgv[0] = nativeShell;
+            for (int i = 0; i < args.Length; i++)
+            {
+                nativeArgv[i + 1] = Marshal.StringToCoTaskMemUTF8(args[i]);
+            }
+            nativeArgv[args.Length + 1] = IntPtr.Zero;
+
             int masterFd;
             int pid;
 
             try
             {
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                {
-                    pid = forkpty_mac(out masterFd, null, IntPtr.Zero, IntPtr.Zero);
-                }
-                else
-                {
-                    pid = forkpty(out masterFd, null, IntPtr.Zero, IntPtr.Zero);
-                }
+                pid = forkpty(out masterFd, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
             }
             catch
             {
+                FreeNativePtyBuffers(nativeWorkDir, nativeArgv, args.Length + 1);
                 return false;
             }
 
-            if (pid < 0) return false;
-
             if (pid == 0)
             {
-                chdir(workingDir);
-                string?[] argv = new string?[args.Length + 2];
-                argv[0] = shellPath;
-                for (int i = 0; i < args.Length; i++) argv[i + 1] = args[i];
-                argv[args.Length + 1] = null;
-
-                execvp(shellPath, argv);
-                Environment.Exit(-1);
+                // Async-signal-safe syscalls only in forked child
+                chdir(nativeWorkDir);
+                execvp(nativeShell, nativeArgv);
+                _exit(127);
             }
 
+            FreeNativePtyBuffers(nativeWorkDir, nativeArgv, args.Length + 1);
+
+            if (pid < 0) return false;
+
+            _unixChildPid = pid;
             _unixFd = masterFd;
 
             Task.Run(() =>
@@ -478,6 +489,15 @@ namespace SpanCoder.Shell
             });
 
             return true;
+        }
+
+        private static void FreeNativePtyBuffers(IntPtr workDir, IntPtr[] argv, int count)
+        {
+            if (workDir != IntPtr.Zero) Marshal.FreeCoTaskMem(workDir);
+            for (int i = 0; i < count; i++)
+            {
+                if (argv[i] != IntPtr.Zero) Marshal.FreeCoTaskMem(argv[i]);
+            }
         }
 
         #endregion
@@ -504,6 +524,13 @@ namespace SpanCoder.Shell
                 else
                 {
                     CleanupConPtyHandles();
+
+                    if (_unixChildPid > 0)
+                    {
+                        kill(_unixChildPid, 9);
+                        waitpid(_unixChildPid, out _, 1);
+                        _unixChildPid = -1;
+                    }
 
                     if (_unixFd != -1)
                     {

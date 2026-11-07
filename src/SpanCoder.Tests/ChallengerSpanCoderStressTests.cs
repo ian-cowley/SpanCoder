@@ -90,7 +90,7 @@ namespace SpanCoder.Tests
             var writerLogger2 = new DelegateGlacierLogger((lvl, msg, ex) => Interlocked.Increment(ref writeCount), LogLevel.Trace);
 
             int writerThreadCount = Math.Clamp(Environment.ProcessorCount, 2, 4);
-            var writerTasks = Enumerable.Range(0, writerThreadCount).Select(id => Task.Run(() =>
+            var writerTasks = Enumerable.Range(0, writerThreadCount).Select(id => Task.Factory.StartNew(() =>
             {
                 int counter = 0;
                 while (!token.IsCancellationRequested)
@@ -111,10 +111,10 @@ namespace SpanCoder.Tests
                         break;
                     }
                 }
-            })).ToArray();
+            }, TaskCreationOptions.LongRunning)).ToArray();
 
             // 2 swapper threads constantly swapping the ambient logger
-            var swapperTasks = Enumerable.Range(0, 2).Select(id => Task.Run(() =>
+            var swapperTasks = Enumerable.Range(0, 2).Select(id => Task.Factory.StartNew(() =>
             {
                 int swapIter = 0;
                 while (!token.IsCancellationRequested)
@@ -148,9 +148,10 @@ namespace SpanCoder.Tests
                         break;
                     }
                 }
-            })).ToArray();
+            }, TaskCreationOptions.LongRunning)).ToArray();
 
-            await Task.Delay(350);
+            SpinWait.SpinUntil(() => Volatile.Read(ref writeCount) > 50 && Volatile.Read(ref swapCount) > 10, TimeSpan.FromSeconds(5));
+            await Task.Delay(50);
             cts.Cancel();
             await Task.WhenAll(writerTasks.Concat(swapperTasks));
 

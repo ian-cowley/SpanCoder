@@ -25,6 +25,11 @@
     <ProjectReference Include="..\SpanCoder.Contracts\SpanCoder.Contracts.csproj" />
     <ProjectReference Include="..\SpanCoder.Engine\SpanCoder.Engine.csproj" />
     <ProjectReference Include="..\SpanCoder.App\SpanCoder.App.csproj" />
+    <ProjectReference Include="..\SpanCoder.Shell\SpanCoder.Shell.csproj" />
+    <ProjectReference Include="..\SpanCoder.Extensions.HtmlPreview\SpanCoder.Extensions.HtmlPreview.csproj" />
+    <ProjectReference Include="..\SpanCoder.Extensions.Languages\SpanCoder.Extensions.Languages.csproj" />
+    <ProjectReference Include="..\SpanCoder.Extensions.Prettier\SpanCoder.Extensions.Prettier.csproj" />
+    <ProjectReference Include="..\..\tools\SpanCoder.SourceGenerators\SpanCoder.SourceGenerators.csproj" />
   </ItemGroup>
 
   <ItemGroup>

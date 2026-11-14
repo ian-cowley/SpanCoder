@@ -7,11 +7,11 @@ using SpanCoder.Contracts;
 
 namespace SpanCoder.Extensions.Languages
 {
-    class Program
+    internal class Program
     {
         private static readonly System.Threading.SemaphoreSlim _writeLock = new(1, 1);
 
-        static async Task Main(string[] args)
+        internal static async Task Main(string[] args)
         {
             SpanCoderDiagnostics.Logger = new ConsoleGlacierLogger(LogLevel.Information);
 
@@ -30,6 +30,13 @@ namespace SpanCoder.Extensions.Languages
                 return;
             }
 
+            string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+            string manifestPath = Path.Combine(exeDir, "plugin.json");
+            await RunAsync(port, manifestPath);
+        }
+
+        internal static async Task RunAsync(int port, string manifestPath, System.Threading.CancellationToken cancellationToken = default)
+        {
             SpanCoderDiagnostics.LogInformation($"[LanguagesPlugin] Connecting to port {port}...");
             
             TcpClient? client = null;
@@ -37,12 +44,10 @@ namespace SpanCoder.Extensions.Languages
             try
             {
                 client = new TcpClient();
-                await client.ConnectAsync("127.0.0.1", port);
+                await client.ConnectAsync("127.0.0.1", port, cancellationToken);
                 stream = client.GetStream();
 
                 // Read plugin.json
-                string exeDir = AppDomain.CurrentDomain.BaseDirectory;
-                string manifestPath = Path.Combine(exeDir, "plugin.json");
                 if (!File.Exists(manifestPath))
                 {
                     SpanCoderDiagnostics.LogError($"[LanguagesPlugin] Manifest not found at {manifestPath}");
@@ -60,7 +65,7 @@ namespace SpanCoder.Extensions.Languages
 
                 // Start Read Loop
                 byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
-                while (client.Connected)
+                while (client.Connected && !cancellationToken.IsCancellationRequested)
                 {
                     int readBytes = await ReadExactlyAsync(stream, headerBuffer, 0, headerBuffer.Length);
                     if (readBytes <= 0) break;
@@ -153,13 +158,13 @@ namespace SpanCoder.Extensions.Languages
             }
         }
 
-        private static Task<(bool Success, string Output)> RunPythonScriptAsync(string filePath, string content)
+        internal static Task<(bool Success, string Output)> RunPythonScriptAsync(string filePath, string content)
         {
             // Pure C# .NET 10 runtime policy: external Python subprocess execution is prohibited.
             return Task.FromResult((false, "External Python subprocess execution is disabled under the pure C# .NET 10 runtime policy."));
         }
 
-        private static string FindCargoProjectDir(string filePath)
+        internal static string FindCargoProjectDir(string filePath)
         {
             if (string.IsNullOrEmpty(filePath)) return "";
             try
@@ -178,7 +183,7 @@ namespace SpanCoder.Extensions.Languages
             return "";
         }
 
-        private static async Task<(bool Success, string Output)> RunCargoBuildAsync(string filePath)
+        internal static async Task<(bool Success, string Output)> RunCargoBuildAsync(string filePath)
         {
             string workingDir = FindCargoProjectDir(filePath);
             if (string.IsNullOrEmpty(workingDir))

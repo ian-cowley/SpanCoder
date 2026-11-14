@@ -8,11 +8,11 @@ using SpanCoder.Contracts;
 
 namespace SpanCoder.Extensions.HtmlPreview
 {
-    class Program
+    internal class Program
     {
         private static readonly SemaphoreSlim _writeLock = new SemaphoreSlim(1, 1);
 
-        static async Task Main(string[] args)
+        internal static async Task Main(string[] args)
         {
             SpanCoderDiagnostics.Logger = new ConsoleGlacierLogger(LogLevel.Information);
 
@@ -31,6 +31,22 @@ namespace SpanCoder.Extensions.HtmlPreview
                 return;
             }
 
+            string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+            string manifestPath = Path.Combine(exeDir, "plugin.json");
+            await RunAsync(port, manifestPath);
+        }
+
+        internal static string GetPreviewContent(string activeContent)
+        {
+            if (string.IsNullOrEmpty(activeContent))
+            {
+                return "<h1>No active document</h1><p>Open an HTML file to preview it.</p>";
+            }
+            return activeContent;
+        }
+
+        internal static async Task RunAsync(int port, string manifestPath, CancellationToken cancellationToken = default)
+        {
             SpanCoderDiagnostics.LogInformation($"[HtmlPreviewPlugin] Connecting to port {port}...");
 
             TcpClient? client = null;
@@ -38,11 +54,9 @@ namespace SpanCoder.Extensions.HtmlPreview
             try
             {
                 client = new TcpClient();
-                await client.ConnectAsync("127.0.0.1", port);
+                await client.ConnectAsync("127.0.0.1", port, cancellationToken);
                 stream = client.GetStream();
 
-                string exeDir = AppDomain.CurrentDomain.BaseDirectory;
-                string manifestPath = Path.Combine(exeDir, "plugin.json");
                 if (!File.Exists(manifestPath))
                 {
                     SpanCoderDiagnostics.LogError($"[HtmlPreviewPlugin] Manifest not found at {manifestPath}");
@@ -59,7 +73,7 @@ namespace SpanCoder.Extensions.HtmlPreview
                 await SendMessageAsync(stream, buffer, len);
 
                 byte[] headerBuffer = new byte[BinaryMessageSerializer.HeaderSize];
-                while (client.Connected)
+                while (client.Connected && !cancellationToken.IsCancellationRequested)
                 {
                     int readBytes = await ReadExactlyAsync(stream, headerBuffer, 0, headerBuffer.Length);
                     if (readBytes <= 0) break;
@@ -83,11 +97,7 @@ namespace SpanCoder.Extensions.HtmlPreview
 
                         if (commandId == "html-preview.show")
                         {
-                            string content = activeContent;
-                            if (string.IsNullOrEmpty(content))
-                            {
-                                content = "<h1>No active document</h1><p>Open an HTML file to preview it.</p>";
-                            }
+                            string content = GetPreviewContent(activeContent);
 
                             // Send panel content update
                             int updateSize = BinaryMessageSerializer.HeaderSize + 8 + "html-preview-panel".Length * sizeof(char) + content.Length * sizeof(char);
